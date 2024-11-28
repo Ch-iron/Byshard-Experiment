@@ -1,0 +1,65 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.zip
+
+# Test binary, built with `go test -c`
+*.test
+*.xml
+latency
+*.csv
+mem_*
+cpu_*
+server.*.log
+client.*.log
+*error*.log
+*.log
+
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+.idea/
+.DS_Store
+
+server.pid
+client.pid
+
+bin/client
+bin/server
+
+bin/deploy/client
+bin/deploy/server
+
+bin/deploy/linux/client
+bin/deploy/linux/server
+
+bin/deploy/linux-docker/client
+bin/deploy/linux-docker/server
+
+bin/deploy/macos/client
+bin/deploy/macos/server
+
+common/statedb
+AWSController/aws
+
+.log
+/package-lock.json
+/node_modules/
+
+
+# AWS script
+*.id
+*.file
+*.dns
+
+bin/deploy/ips.txt
+bin/deploy/public_ips.txt
+bin/deploy/log
+
+bin/error.log
