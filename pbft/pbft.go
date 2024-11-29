@@ -37,16 +37,16 @@ type PBFT struct {
 	bc                   *blockchain.BlockChain
 	voteQuorum           quorum.Quorum
 	commitQuorum         quorum.Quorum
-	committedBlocks      chan *blockchain.WorkerBlock
-	forkedBlocks         chan *blockchain.WorkerBlock
-	reservedBlock        chan *blockchain.WorkerBlock
+	committedBlocks      chan *blockchain.ShardBlock
+	forkedBlocks         chan *blockchain.ShardBlock
+	reservedBlock        chan *blockchain.ShardBlock
 	updatedQC            chan *quorum.QC
 	lastCreatedBlockQC   *quorum.QC
 	bufferedQCs          map[common.Hash]*quorum.QC
 	bufferedCQCs         map[common.Hash]*quorum.QC
-	bufferedBlocks       map[types.Epoch]map[types.View]map[types.BlockHeight]*blockchain.WorkerBlock
+	bufferedBlocks       map[types.Epoch]map[types.View]map[types.BlockHeight]*blockchain.ShardBlock
 	bufferedAccepts      map[types.Epoch]map[types.View]map[types.BlockHeight]*blockchain.Accept
-	agreeingBlocks       map[types.Epoch]map[types.View]map[types.BlockHeight]*blockchain.WorkerBlock
+	agreeingBlocks       map[types.Epoch]map[types.View]map[types.BlockHeight]*blockchain.ShardBlock
 	mu                   sync.Mutex
 
 	detectedTmos map[identity.NodeID]*pacemaker.TMO
@@ -104,9 +104,9 @@ func NewPBFT(
 	pm *pacemaker.Pacemaker,
 	pt *mempool.ManageTransactions,
 	elec election.Election,
-	committedBlocks chan *blockchain.WorkerBlock,
-	forkedBlocks chan *blockchain.WorkerBlock,
-	reservedBlock chan *blockchain.WorkerBlock,
+	committedBlocks chan *blockchain.ShardBlock,
+	forkedBlocks chan *blockchain.ShardBlock,
+	reservedBlock chan *blockchain.ShardBlock,
 	blockdatas *mempool.Producer) *PBFT {
 	pb := new(PBFT)
 	pb.Node = node
@@ -116,9 +116,9 @@ func NewPBFT(
 	pb.bc = blockchain.NewBlockchain(pb.Shard(), config.GetConfig().DefaultBalance, pb.ID().Node())
 	pb.voteQuorum = quorum.NewVoteQuorum(config.GetConfig().CommitteeNumber)
 	pb.commitQuorum = quorum.NewCommitQuorum(config.GetConfig().CommitteeNumber)
-	pb.bufferedBlocks = make(map[types.Epoch]map[types.View]map[types.BlockHeight]*blockchain.WorkerBlock)
+	pb.bufferedBlocks = make(map[types.Epoch]map[types.View]map[types.BlockHeight]*blockchain.ShardBlock)
 	pb.bufferedAccepts = make(map[types.Epoch]map[types.View]map[types.BlockHeight]*blockchain.Accept)
-	pb.agreeingBlocks = make(map[types.Epoch]map[types.View]map[types.BlockHeight]*blockchain.WorkerBlock)
+	pb.agreeingBlocks = make(map[types.Epoch]map[types.View]map[types.BlockHeight]*blockchain.ShardBlock)
 	pb.bufferedQCs = make(map[common.Hash]*quorum.QC)
 	pb.highQC = &quorum.QC{View: 0}
 	pb.bufferedCQCs = make(map[common.Hash]*quorum.QC)
@@ -210,12 +210,12 @@ func (pb *PBFT) WaitTransactionAddLock(waiting_transaction *message.Transaction,
 		log.LockDebugf("[%v %v] (WaitTransactionAddLock) Start paperexperiment Protocol in wait transaction Hash: %v, Nonce: %v, IsCross: %v", pb.ID(), pb.Shard(), waiting_transaction.Hash, waiting_transaction.Nonce+1, waiting_transaction.IsCrossShardTx)
 		waiting_transaction.Nonce++
 	}
-	pb.SendToBlockBuilder(waiting_transaction)
+	pb.SendToCommunicator(waiting_transaction)
 }
 
-func (pb *PBFT) CreateWorkerBlock() *blockchain.WorkerBlock {
+func (pb *PBFT) CreateShardBlock() *blockchain.ShardBlock {
 	blockdata := pb.committed_transactions.GeneratePayload(pb.pt)
-	log.Debugf("[Shard %v] (CreateWorkerBlock) Start CreateBlock BlockHeight: %v Transactions: %v", pb.Shard(), pb.GetLastBlockHeight()+1, len(blockdata))
+	log.Debugf("[Shard %v] (CreateShardBlock) Start CreateBlock BlockHeight: %v Transactions: %v", pb.Shard(), pb.GetLastBlockHeight()+1, len(blockdata))
 
 	for _, committedTransaction := range blockdata {
 		if committedTransaction.IsCrossShardTx {
@@ -233,18 +233,18 @@ func (pb *PBFT) CreateWorkerBlock() *blockchain.WorkerBlock {
 		pb.pbftMeasure.StartTime = time.Now()
 	}
 
-	log.Debugf("[%v %v] (CreateWorkerBlock)0 blockheight %v stateHash %v", pb.ID(), pb.Shard(), pb.GetLastBlockHeight()+1, pb.bc.GetCurrentStateHash())
+	log.Debugf("[%v %v] (CreateShardBlock)0 blockheight %v stateHash %v", pb.ID(), pb.Shard(), pb.GetLastBlockHeight()+1, pb.bc.GetCurrentStateHash())
 	pb.executemu.Lock()
-	log.Debugf("[%v %v] (CreateWorkerBlock)1 blockheight %v stateHash %v", pb.ID(), pb.Shard(), pb.GetLastBlockHeight()+1, pb.bc.GetCurrentStateHash())
+	log.Debugf("[%v %v] (CreateShardBlock)1 blockheight %v stateHash %v", pb.ID(), pb.Shard(), pb.GetLastBlockHeight()+1, pb.bc.GetCurrentStateHash())
 	root, err := pb.bc.GetStateDB().Commit(0, true, 0)
-	log.Debugf("[%v %v] (CreateWorkerBlock)2 blockheight %v stateHash %v", pb.ID(), pb.Shard(), pb.GetLastBlockHeight()+1, pb.bc.GetCurrentStateHash())
+	log.Debugf("[%v %v] (CreateShardBlock)2 blockheight %v stateHash %v", pb.ID(), pb.Shard(), pb.GetLastBlockHeight()+1, pb.bc.GetCurrentStateHash())
 	pb.bc.SetStateDB(root)
-	log.Debugf("[%v %v] (CreateWorkerBlock)3 blockheight %v stateHash %v", pb.ID(), pb.Shard(), pb.GetLastBlockHeight()+1, pb.bc.GetCurrentStateHash())
+	log.Debugf("[%v %v] (CreateShardBlock)3 blockheight %v stateHash %v", pb.ID(), pb.Shard(), pb.GetLastBlockHeight()+1, pb.bc.GetCurrentStateHash())
 	pb.executemu.Unlock()
 	if err != nil {
-		log.Errorf("[%v %v] (ProcessWorkerBlock) BlockHeight: %v Commit State Error: %v", pb.ID(), pb.Shard(), pb.GetLastBlockHeight()+1, err)
+		log.Errorf("[%v %v] (ProcessShardBlock) BlockHeight: %v Commit State Error: %v", pb.ID(), pb.Shard(), pb.GetLastBlockHeight()+1, err)
 	} else {
-		log.Debugf("[%v %v] (ProcessWorkerBlock) Commit Root Hash: %v", pb.ID(), pb.Shard(), root)
+		log.Debugf("[%v %v] (ProcessShardBlock) Commit Root Hash: %v", pb.ID(), pb.Shard(), root)
 	}
 
 	// wait qc from updatedQC channel
@@ -258,31 +258,31 @@ func (pb *PBFT) CreateWorkerBlock() *blockchain.WorkerBlock {
 		<-pb.updatedQC
 	}
 
-	block := blockchain.CreateWorkerBlock(blockdata, pb.pm.GetCurEpoch(), pb.pm.GetCurView(), pb.bc.GetCurrentStateHash(), qc.BlockID, pb.GetHighBlockHeight(), qc, pb.Shard())
+	block := blockchain.CreateShardBlock(blockdata, pb.pm.GetCurEpoch(), pb.pm.GetCurView(), pb.bc.GetCurrentStateHash(), qc.BlockID, pb.GetHighBlockHeight(), qc, pb.Shard())
 	pb.lastCreatedBlockQC = block.QC
 
-	log.Debugf("[%v %v] (CreateWorkerBlock) finished making a proposal for blockheight %v view %v epoch %v Hash %v", pb.ID(), pb.Shard(), block.Block_header.Block_height, block.Block_header.View_num, block.Block_header.Epoch_num, block.Block_hash)
+	log.Debugf("[%v %v] (CreateShardBlock) finished making a proposal for blockheight %v view %v epoch %v Hash %v", pb.ID(), pb.Shard(), block.Block_header.Block_height, block.Block_header.View_num, block.Block_header.Epoch_num, block.Block_hash)
 
-	log.StateInfof("[Shard %v] (CreateWorkerBlock) Start ProcessTransaction BlockHeight: %v", pb.Shard(), block.Block_header.Block_height)
+	log.StateInfof("[Shard %v] (CreateShardBlock) Start ProcessTransaction BlockHeight: %v", pb.Shard(), block.Block_header.Block_height)
 	return block
 }
 
 /* Consensus Process */
-func (pb *PBFT) ProcessWorkerBlock(block *blockchain.WorkerBlock) error {
-	log.Debugf("[%v %v] (ProcessWorkerBlock) processing block from leader %v blockHeight %v view %v epoch %v Hash %v", pb.ID(), pb.Shard(), block.Proposer, block.Block_header.Block_height, block.Block_header.View_num, block.Block_header.Epoch_num, block.Block_hash)
+func (pb *PBFT) ProcessShardBlock(block *blockchain.ShardBlock) error {
+	log.Debugf("[%v %v] (ProcessShardBlock) processing block from leader %v blockHeight %v view %v epoch %v Hash %v", pb.ID(), pb.Shard(), block.Proposer, block.Block_header.Block_height, block.Block_header.View_num, block.Block_header.Epoch_num, block.Block_hash)
 
 	curBlockHeight := pb.GetHighBlockHeight()
 
 	if block.Block_header.View_num > pb.pm.GetCurView() {
 		utils.AddEntity(pb.bufferedBlocks, block.Block_header.Epoch_num, block.Block_header.View_num, block.Block_header.Block_height-1, block)
-		log.Debugf("[%v %v] (ProcessWorkerBlock) the block is buffered for large epoch %v ID %v ", pb.ID(), pb.Shard(), block.Block_header.View_num, block.Block_hash)
+		log.Debugf("[%v %v] (ProcessShardBlock) the block is buffered for large epoch %v ID %v ", pb.ID(), pb.Shard(), block.Block_header.View_num, block.Block_hash)
 		return nil
 	}
 
 	// process block verify
 	err := pb.processCertificateBlock(block)
 	if err != nil {
-		log.Errorf("[%v %v] (ProcessWorkerBlock) failed certificate block: %v, Hash %v", pb.ID(), pb.Shard(), err, block.Block_hash)
+		log.Errorf("[%v %v] (ProcessShardBlock) failed certificate block: %v, Hash %v", pb.ID(), pb.Shard(), err, block.Block_hash)
 		return err
 	}
 
@@ -291,12 +291,12 @@ func (pb *PBFT) ProcessWorkerBlock(block *blockchain.WorkerBlock) error {
 		// buffer the block for which it can be processed after processing the block of block height - 1
 		utils.AddEntity(pb.bufferedBlocks, block.Block_header.Epoch_num, block.Block_header.View_num, block.Block_header.Block_height-1, block)
 		// pb.bufferedBlocks[types.Epoch(block.Block_header.Block_height)-1] = block
-		log.Debugf("[%v %v] (ProcessWorkerBlock) the block is buffered for large blockheight %v ID %v", pb.ID(), pb.Shard(), block.Block_header.Block_height, block.Block_hash)
+		log.Debugf("[%v %v] (ProcessShardBlock) the block is buffered for large blockheight %v ID %v", pb.ID(), pb.Shard(), block.Block_header.Block_height, block.Block_hash)
 		return nil
 	} else if pb.State() == types.VIEWCHANGING {
 		utils.AddEntity(pb.bufferedBlocks, block.Block_header.Epoch_num, block.Block_header.View_num, block.Block_header.Block_height, block)
 		// pb.bufferedBlocks[types.Epoch(block.Block_header.Block_height)] = block
-		log.Debugf("[%v %v] (ProcessWorkerBlock) the block is buffered for viewchange ID %v", pb.ID(), pb.Shard(), block.Block_hash)
+		log.Debugf("[%v %v] (ProcessShardBlock) the block is buffered for viewchange ID %v", pb.ID(), pb.Shard(), block.Block_hash)
 		return nil
 	}
 
@@ -306,9 +306,9 @@ func (pb *PBFT) ProcessWorkerBlock(block *blockchain.WorkerBlock) error {
 		pb.bc.SetStateDB(root)
 		pb.executemu.Unlock()
 		if err != nil {
-			log.Errorf("[%v %v] (ProcessWorkerBlock) BlockHeight: %v Commit State Error: %v", pb.ID(), pb.Shard(), pb.GetLastBlockHeight()+1, err)
+			log.Errorf("[%v %v] (ProcessShardBlock) BlockHeight: %v Commit State Error: %v", pb.ID(), pb.Shard(), pb.GetLastBlockHeight()+1, err)
 		} else {
-			log.PerformanceInfof("[%v %v] (ProcessWorkerBlock) Commit Root Hash: %v", pb.ID(), pb.Shard(), root)
+			log.PerformanceInfof("[%v %v] (ProcessShardBlock) Commit Root Hash: %v", pb.ID(), pb.Shard(), root)
 		}
 	}
 
@@ -329,15 +329,15 @@ func (pb *PBFT) ProcessWorkerBlock(block *blockchain.WorkerBlock) error {
 
 	shouldVote, err := pb.votingRule(block)
 	if err != nil {
-		log.Errorf("[%v %v] (ProcessWorkerBlock) cannot decide whether to vote the block: %v", pb.ID(), pb.Shard(), err)
+		log.Errorf("[%v %v] (ProcessShardBlock) cannot decide whether to vote the block: %v", pb.ID(), pb.Shard(), err)
 		return err
 	}
 	if !shouldVote {
-		log.Warningf("[%v %v] (ProcessWorkerBlock) is not going to vote for block ID %v", pb.ID(), pb.Shard(), block.Block_hash)
+		log.Warningf("[%v %v] (ProcessShardBlock) is not going to vote for block ID %v", pb.ID(), pb.Shard(), block.Block_hash)
 		return nil
 	}
 
-	log.Debugf("[%v %v] (ProcessWorkerBlock) finished processing block from leader %v blockHeight %v view %v epoch %v ID %v", pb.ID(), pb.Shard(), block.Proposer, block.Block_header.Block_height, block.Block_header.View_num, block.Block_header.Epoch_num, block.Block_hash)
+	log.Debugf("[%v %v] (ProcessShardBlock) finished processing block from leader %v blockHeight %v view %v epoch %v ID %v", pb.ID(), pb.Shard(), block.Proposer, block.Block_header.Block_height, block.Block_header.View_num, block.Block_header.Epoch_num, block.Block_hash)
 
 	vote := quorum.MakeVote(block.Block_header.Epoch_num, block.Block_header.View_num, block.Block_header.Block_height, pb.ID(), block.Block_hash)
 
@@ -486,13 +486,13 @@ func (pb *PBFT) ProcessAccept(accept *blockchain.Accept) {
 	}
 
 	if block, exist := pb.bufferedBlocks[curEpoch][curView][block.Block_header.Block_height]; exist {
-		_ = pb.ProcessWorkerBlock(block)
+		_ = pb.ProcessShardBlock(block)
 		delete(pb.bufferedBlocks[curEpoch][curView], block.Block_header.Block_height)
 	}
 }
 
 /* Certificate */
-func (pb *PBFT) processCertificateBlock(block *blockchain.WorkerBlock) error {
+func (pb *PBFT) processCertificateBlock(block *blockchain.ShardBlock) error {
 	log.Debugf("[%v %v] (processCertificateBlock) processing certificate block blockHeight: %v view: %v epoch: %v ID: %v", pb.ID(), pb.Shard(), block.Block_header.Block_height, block.Block_header.View_num, block.Block_header.Epoch_num, block.Block_hash)
 
 	qc := block.QC
@@ -591,7 +591,7 @@ func (pb *PBFT) processCertificateVote(qc *quorum.QC) {
 
 	curEpoch, curView := pb.pm.GetCurEpochView()
 	if block, ok := pb.bufferedBlocks[curEpoch][curView][qc.BlockHeight]; ok {
-		_ = pb.ProcessWorkerBlock(block)
+		_ = pb.ProcessShardBlock(block)
 		delete(pb.bufferedBlocks[curEpoch][curView], qc.BlockHeight)
 	}
 
@@ -633,9 +633,9 @@ func (pb *PBFT) processCertificateCqc(cqc *quorum.QC) {
 
 	if curBlock.Proposer == pb.ID() {
 		crossShardTransactionLatency := pb.pbftMeasure.CalculateMeasurements(curBlock, pb.Shard())
-		pb.SendToBlockBuilder(&crossShardTransactionLatency)
-		pb.SendToBlockBuilder(curBlock)
-		log.Debugf("[%v %v] (processCertificateCqc) Send Block completed consensus To BlockBuilder Committed Transaction: %v", pb.ID(), pb.Shard(), len(curBlock.Transaction))
+		pb.SendToCommunicator(&crossShardTransactionLatency)
+		pb.SendToCommunicator(curBlock)
+		log.Debugf("[%v %v] (processCertificateCqc) Send Block completed consensus To Communicator Committed Transaction: %v", pb.ID(), pb.Shard(), len(curBlock.Transaction))
 	}
 	log.Debugf("[%v %v] (processCertificateCqc) finished processing commit quorum certification blockHeight %v view %v epoch %v ID %v", pb.ID(), pb.Shard(), cqc.BlockHeight, cqc.View, cqc.Epoch, cqc.BlockID)
 }
@@ -669,7 +669,7 @@ func (pb *PBFT) commitBlock(cqc *quorum.QC) error {
 	return nil
 }
 
-func (pb *PBFT) votingRule(block *blockchain.WorkerBlock) (bool, error) {
+func (pb *PBFT) votingRule(block *blockchain.ShardBlock) (bool, error) {
 	if block.Block_header.Block_height <= 2 {
 		return true, nil
 	}
@@ -683,7 +683,7 @@ func (pb *PBFT) votingRule(block *blockchain.WorkerBlock) (bool, error) {
 	return true, nil
 }
 
-func (pb *PBFT) commitRule(cqc *quorum.QC) (bool, *blockchain.WorkerBlock, error) {
+func (pb *PBFT) commitRule(cqc *quorum.QC) (bool, *blockchain.ShardBlock, error) {
 	parentBlock, err := pb.bc.GetParentBlock(cqc.BlockID)
 	if err != nil {
 		return false, nil, fmt.Errorf("cannot commit any block: %v", err)
@@ -828,7 +828,7 @@ func (pb *PBFT) ProcessTC(tc *pacemaker.TC) {
 	curEpoch, curView = pb.pm.GetCurEpochView()
 
 	if block, exist := pb.bufferedBlocks[curEpoch][curView][tc.BlockHeightNew]; exist {
-		_ = pb.ProcessWorkerBlock(block)
+		_ = pb.ProcessShardBlock(block)
 		delete(pb.bufferedBlocks[curEpoch][curView], tc.BlockHeightNew)
 	}
 

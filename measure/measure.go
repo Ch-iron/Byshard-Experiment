@@ -82,11 +82,11 @@ func IsExist(address common.Address, shard types.Shard) bool {
 	}
 }
 
-func (measure *PBFTMeasure) CalculateMeasurements(curWorkerBlockBlock *blockchain.WorkerBlock, shard types.Shard) message.Experiment {
+func (measure *PBFTMeasure) CalculateMeasurements(curShardBlockBlock *blockchain.ShardBlock, shard types.Shard) message.Experiment {
 	crossShardTransactionLatency := make([]*message.CrossShardTransactionLatency, 0)
 
 	// calculate local latency and latency dissection
-	for _, tx := range curWorkerBlockBlock.Transaction {
+	for _, tx := range curShardBlockBlock.Transaction {
 		switch tx.IsCrossShardTx {
 		case true:
 			tx.LatencyDissection.CommitToBlockTime = time.Now().UnixMilli() - tx.LatencyDissection.CommitToBlockTime
@@ -158,7 +158,7 @@ func (measure *PBFTMeasure) CalculateMeasurements(curWorkerBlockBlock *blockchai
 	waitingTime := avgBlockWaitingTime
 	total := consensusForISC + ISC + consensusForCommit + waitingTime
 
-	log.ShardStatisticf("[Shard %v][Overview] total TPS: %v, local TPS: %v, cross TPS: %v, local process latency: %v, cross process latency: %v, local commit latency: %v, cross commit latency: %v, total conflict tx: %v, total committed tx: %v, committed tx num: %v", shard, totalTPS, localTPS, crossTPS, avgLocalProcessTime, avgCrossProcessTime, avgLocalLatency, avgCrossLatency, totalConflict, measure.TotalCommittedTx, len(curWorkerBlockBlock.Transaction))
+	log.ShardStatisticf("[Shard %v][Overview] total TPS: %v, local TPS: %v, cross TPS: %v, local process latency: %v, cross process latency: %v, local commit latency: %v, cross commit latency: %v, total conflict tx: %v, total committed tx: %v, committed tx num: %v", shard, totalTPS, localTPS, crossTPS, avgLocalProcessTime, avgCrossProcessTime, avgLocalLatency, avgCrossLatency, totalConflict, measure.TotalCommittedTx, len(curShardBlockBlock.Transaction))
 	log.ShardStatisticf("[Shard %v][Local Dissection] LocalConsensus: %.3f, LocalWaitingTime: %.3f, LocalConsensusForCommit: %.3f, localTotal: %.3f", shard, avgLocalConsensusTime, avgLocalBlockWaitingTime, avgLocalCommitToBlockTime, localTotal)
 	log.ShardStatisticf("[Shard %v][Cross Dissection] ConsensusForISC: %.3f, ISC: %.3f, ConsensusForCommit: %.3f, WaitingTime: %.3f, Total: %.3f", shard, consensusForISC, ISC, consensusForCommit, waitingTime, total)
 

@@ -10,7 +10,7 @@ type Vertex interface {
 	// Parent returns the returns the parents (level, ID)
 	Parent() (common.Hash, uint64)
 	// GetBlock returns the block contained in vertex
-	GetBlock() *WorkerBlock
+	GetBlock() *ShardBlock
 }
 
 // VertexIterator is a stateful iterator for VertexList.

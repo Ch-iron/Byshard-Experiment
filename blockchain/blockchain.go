@@ -75,7 +75,7 @@ func (bc *BlockChain) Exists(id common.Hash) bool {
 	return bc.forest.HasVertex(id)
 }
 
-func (bc *BlockChain) AddBlock(block *WorkerBlock) {
+func (bc *BlockChain) AddBlock(block *ShardBlock) {
 	blockContainer := &BlockContainer{block}
 	bc.forest.AddVertex(blockContainer)
 }
@@ -97,7 +97,7 @@ func (bc *BlockChain) SetStateDB(rootHash common.Hash) {
 	bc.statedb, _ = state.New(rootHash, bc.nodedb)
 }
 
-func (bc *BlockChain) GetBlockByID(id common.Hash) (*WorkerBlock, error) {
+func (bc *BlockChain) GetBlockByID(id common.Hash) (*ShardBlock, error) {
 	vertex, exists := bc.forest.GetVertex(id)
 	if !exists {
 		return nil, fmt.Errorf("the block does not exist, id: %x", id)
@@ -105,7 +105,7 @@ func (bc *BlockChain) GetBlockByID(id common.Hash) (*WorkerBlock, error) {
 	return vertex.GetBlock(), nil
 }
 
-func (bc *BlockChain) GetParentBlock(id common.Hash) (*WorkerBlock, error) {
+func (bc *BlockChain) GetParentBlock(id common.Hash) (*ShardBlock, error) {
 	vertex, exists := bc.forest.GetVertex(id)
 	if !exists {
 		return nil, fmt.Errorf("the block does not exist, id: %x", id)
@@ -118,7 +118,7 @@ func (bc *BlockChain) GetParentBlock(id common.Hash) (*WorkerBlock, error) {
 	return parentVertex.GetBlock(), nil
 }
 
-func (bc *BlockChain) GetGrandParentBlock(id common.Hash) (*WorkerBlock, error) {
+func (bc *BlockChain) GetGrandParentBlock(id common.Hash) (*ShardBlock, error) {
 	parentBlock, err := bc.GetParentBlock(id)
 	if err != nil {
 		return nil, fmt.Errorf("cannot get parent block: %w", err)
@@ -135,14 +135,14 @@ func (bc *BlockChain) GetStateHashByBlockID(id common.Hash) (common.Hash, error)
 }
 
 // CommitBlock prunes blocks and returns committed blocks up to the last committed one and prunedBlocks
-func (bc *BlockChain) CommitBlock(id common.Hash, blockHeight types.BlockHeight, quorums []quorum.Quorum) ([]*WorkerBlock, []*WorkerBlock, error) {
+func (bc *BlockChain) CommitBlock(id common.Hash, blockHeight types.BlockHeight, quorums []quorum.Quorum) ([]*ShardBlock, []*ShardBlock, error) {
 	vertex, ok := bc.forest.GetVertex(id)
 	if !ok {
 		return nil, nil, fmt.Errorf("cannot find the block, id: %x", id)
 	}
 	committedBlockHeight := vertex.GetBlock().Block_header.Block_height
 	bc.highestComitted = int(vertex.GetBlock().Block_header.Block_height)
-	var committedBlocks []*WorkerBlock
+	var committedBlocks []*ShardBlock
 	// Block이 정상적으로 합의에 이르렀는지 체크
 	// 범위: ( Lowest Level block, Commit 대상 Block ]
 	for block := vertex.GetBlock(); uint64(block.Block_header.Block_height) > bc.forest.LowestLevel; {
@@ -174,8 +174,8 @@ func (bc *BlockChain) RevertBlock(blockheight types.BlockHeight) {
 	bc.forest.revertHighestBlock(uint64(blockheight))
 }
 
-func (bc *BlockChain) GetChildrenBlocks(id common.Hash) []*WorkerBlock {
-	var blocks []*WorkerBlock
+func (bc *BlockChain) GetChildrenBlocks(id common.Hash) []*ShardBlock {
+	var blocks []*ShardBlock
 	iterator := bc.forest.GetChildren(id)
 	for I := iterator; I.HasNext(); {
 		blocks = append(blocks, I.NextVertex().GetBlock())
@@ -199,7 +199,7 @@ func (bc *BlockChain) GetCommittedBlocks() int {
 	return bc.committedBlockNo
 }
 
-func (bc *BlockChain) GetBlockByBlockHeight(blockHeight types.BlockHeight) *WorkerBlock {
+func (bc *BlockChain) GetBlockByBlockHeight(blockHeight types.BlockHeight) *ShardBlock {
 	iterator := bc.forest.GetVerticesAtLevel(uint64(blockHeight))
 	return iterator.next.GetBlock()
 }

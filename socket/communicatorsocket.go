@@ -14,7 +14,7 @@ import (
 )
 
 // Socket integrates all networking interface and fault injections
-type BBSocket interface {
+type CommSocket interface {
 
 	// Send put message to outbound queue
 	Send(to identity.NodeID, m interface{})
@@ -40,7 +40,7 @@ type BBSocket interface {
 	Crash(t int)                                // node crash for t seconds
 }
 
-type bbsocket struct {
+type commsocket struct {
 	ip        string
 	shard     types.Shard
 	transport transport.Transport
@@ -56,11 +56,11 @@ type bbsocket struct {
 }
 
 // NewSocket return Socket interface instance given self NodeID, node list, transport and codec name
-func NewBBSocket(ip string, shard types.Shard, addrs map[types.Shard]map[identity.NodeID]string) BBSocket {
-	bbs := new(bbsocket)
-	bbs.ip = ip
-	bbs.shard = shard
-	bbs.transport = transport.NewTransport(ip)
+func NewCommunicatorSocket(ip string, shard types.Shard, addrs map[types.Shard]map[identity.NodeID]string) CommSocket {
+	comms := new(commsocket)
+	comms.ip = ip
+	comms.shard = shard
+	comms.transport = transport.NewTransport(ip)
 	tmpaddrs := make(map[types.Shard]map[identity.NodeID]string)
 	tmpaddrs[shard] = make(map[identity.NodeID]string)
 	for nodeshard, address := range addrs {
@@ -74,19 +74,19 @@ func NewBBSocket(ip string, shard types.Shard, addrs map[types.Shard]map[identit
 			}
 		}
 	}
-	bbs.addresses = tmpaddrs[shard]
-	bbs.nodes = make(map[identity.NodeID]transport.Transport)
-	bbs.crash = false
-	bbs.drop = make(map[identity.NodeID]bool)
-	bbs.slow = make(map[identity.NodeID]int)
-	bbs.flaky = make(map[identity.NodeID]float64)
+	comms.addresses = tmpaddrs[shard]
+	comms.nodes = make(map[identity.NodeID]transport.Transport)
+	comms.crash = false
+	comms.drop = make(map[identity.NodeID]bool)
+	comms.slow = make(map[identity.NodeID]int)
+	comms.flaky = make(map[identity.NodeID]float64)
 
-	bbs.transport.Listen()
+	comms.transport.Listen()
 
-	return bbs
+	return comms
 }
 
-func (s *bbsocket) Send(to identity.NodeID, m interface{}) {
+func (s *commsocket) Send(to identity.NodeID, m interface{}) {
 	// log.Debugf("shard %v send message %v to %v", s.shard, m, to)
 
 	if s.crash {
@@ -137,7 +137,7 @@ func (s *bbsocket) Send(to identity.NodeID, m interface{}) {
 	// log.Debugf("shard %v send message done %v to %v", s.shard, m, to)
 }
 
-func (s *bbsocket) Recv() interface{} {
+func (s *commsocket) Recv() interface{} {
 	s.lock.RLock()
 	t := s.transport
 	s.lock.RUnlock()
@@ -149,7 +149,7 @@ func (s *bbsocket) Recv() interface{} {
 	}
 }
 
-func (s *bbsocket) MulticastQuorum(quorum int, m interface{}) {
+func (s *commsocket) MulticastQuorum(quorum int, m interface{}) {
 	//log.Debugf("node %s multicasting message %+v for %d nodes", s.id, m, quorum)
 	sent := map[int]struct{}{}
 	for i := 0; i < quorum; i++ {
@@ -163,7 +163,7 @@ func (s *bbsocket) MulticastQuorum(quorum int, m interface{}) {
 	}
 }
 
-func (s *bbsocket) Broadcast(m interface{}) {
+func (s *commsocket) Broadcast(m interface{}) {
 	// log.Debugf("shard %v broadcasting message %v", s.shard, m)
 	latencytimer := utils.GetBetweenShardTimer(s.shard, s.shard)
 	<-latencytimer.C
@@ -173,7 +173,7 @@ func (s *bbsocket) Broadcast(m interface{}) {
 	// log.Debugf("shard %v done broadcasting message %v", s.shard, m)
 }
 
-func (s *bbsocket) BroadcastToSome(some []identity.NodeID, m interface{}) {
+func (s *commsocket) BroadcastToSome(some []identity.NodeID, m interface{}) {
 	//log.Debugf("node %s broadcasting message %+v", s.id, m)
 	for _, id := range some {
 		if _, exist := s.addresses[id]; !exist {
@@ -184,13 +184,13 @@ func (s *bbsocket) BroadcastToSome(some []identity.NodeID, m interface{}) {
 	// log.Errorf("node %s done  broadcasting message %+v", s.id, m)
 }
 
-func (s *bbsocket) Close() {
+func (s *commsocket) Close() {
 	for _, t := range s.nodes {
 		t.Close()
 	}
 }
 
-func (s *bbsocket) Drop(id identity.NodeID, t int) {
+func (s *commsocket) Drop(id identity.NodeID, t int) {
 	s.drop[id] = true
 	timer := time.NewTimer(time.Duration(t) * time.Second)
 	go func() {
@@ -199,7 +199,7 @@ func (s *bbsocket) Drop(id identity.NodeID, t int) {
 	}()
 }
 
-func (s *bbsocket) Slow(id identity.NodeID, delay int, t int) {
+func (s *commsocket) Slow(id identity.NodeID, delay int, t int) {
 	s.slow[id] = delay
 	timer := time.NewTimer(time.Duration(t) * time.Second)
 	go func() {
@@ -208,7 +208,7 @@ func (s *bbsocket) Slow(id identity.NodeID, delay int, t int) {
 	}()
 }
 
-func (s *bbsocket) Flaky(id identity.NodeID, p float64, t int) {
+func (s *commsocket) Flaky(id identity.NodeID, p float64, t int) {
 	s.flaky[id] = p
 	timer := time.NewTimer(time.Duration(t) * time.Second)
 	go func() {
@@ -217,7 +217,7 @@ func (s *bbsocket) Flaky(id identity.NodeID, p float64, t int) {
 	}()
 }
 
-func (s *bbsocket) Crash(t int) {
+func (s *commsocket) Crash(t int) {
 	s.crash = true
 	if t > 0 {
 		timer := time.NewTimer(time.Duration(t) * time.Second)

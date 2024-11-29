@@ -10,7 +10,7 @@ display_usage() {
     echo -e "\nUsage: $0 [-h] [-a algorithm] [-s severity] \n"
     echo "  -h              display help"
     echo "  -a algorithm    specify consensus: [pbft, falcon, xft, zyzzyva]"
-    echo "  -m mode         specify mode: [client, coordination, worker]"
+    echo "  -m mode         specify mode: [client, coordination, node]"
     echo "  -s severity     specify severity, default is 'debug': [info, debug, warning]"
 }
 # check whether user had supplied -h or --help . If yes display usage
@@ -31,7 +31,7 @@ do
         h) ;;
     esac
 done
-if [[ ${alg} != "pbft" && ${alg} != "falcon" && ${alg} != "xft" && ${alg} != "zyzzyva" && ${alg} != "raft" && ${alg} != "paxos" ]]; then
+if [[ ${alg} != "pbft" ]]; then
     display_usage
     echo -e "Error: invalid algoirthm ${alg}"
     exit 4
@@ -41,7 +41,7 @@ if [[ ${severity} != "debug" && ${severity} != "info" && ${severity} != "warning
     echo -e "Error: invalid severity ${severity}"
     exit 5
 fi
-if [[ ${mode} != "client" && ${mode} != "coordination" && ${mode} != "worker" ]]; then
+if [[ ${mode} != "client" && ${mode} != "coordination" && ${mode} != "node" ]]; then
     display_usage
     echo -e "Error: invalid mode ${mode}"
     exit 6
@@ -58,7 +58,7 @@ if [ ${mode} == "client" ]; then
         echo "Clients are already started in this folder."
         exit 0
     fi
-elif [[ ${mode} == "coordination" || ${mode} == "worker" || ${mode} == "gateway" ]]; then
+elif [[ ${mode} == "coordination" || ${mode} == "node" || ${mode} == "gateway" ]]; then
     SERVER_PID_FILE=server.pid
     SERVER_PID=$(cat "${SERVER_PID_FILE}");
     if [ -z "${SERVER_PID}" ]; then

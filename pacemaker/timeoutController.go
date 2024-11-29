@@ -21,7 +21,7 @@ func NewTimeoutController(n int) *TimeoutController {
 	return tcl
 }
 
-func (tcl *TimeoutController) AddTmo(tmo *TMO) (bool, *TC, *blockchain.WorkerBlock) {
+func (tcl *TimeoutController) AddTmo(tmo *TMO) (bool, *TC, *blockchain.ShardBlock) {
 	tcl.mu.Lock()
 	defer tcl.mu.Unlock()
 	if tcl.superMajority(tmo.NewView) {
@@ -41,7 +41,7 @@ func (tcl *TimeoutController) AddTmo(tmo *TMO) (bool, *TC, *blockchain.WorkerBlo
 	return false, nil, nil
 
 }
-func (tcl *TimeoutController) AddMjorityTmo(tmo *TMO) (bool, *TC, *blockchain.WorkerBlock) {
+func (tcl *TimeoutController) AddMjorityTmo(tmo *TMO) (bool, *TC, *blockchain.ShardBlock) {
 	tcl.mu.Lock()
 	defer tcl.mu.Unlock()
 	if tcl.Majority(tmo.NewView) {

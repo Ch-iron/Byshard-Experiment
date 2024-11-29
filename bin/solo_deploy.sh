@@ -28,7 +28,7 @@ if [ -z "${SERVER_PID}" ]; then
     echo $! >> ${SERVER_PID_FILE}
     for (( i=1; i<${SHARD}; i=i+1 ))
     do
-        ./server -sim=false -mode=blockbuilder -shard=$i -id=0 2> errorBB$i.log &
+        ./server -sim=false -mode=communicator -shard=$i -id=0 2> errorComm$i.log &
         echo $! >> ${SERVER_PID_FILE}
     done
     sleep 1

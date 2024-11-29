@@ -22,7 +22,7 @@ start(){
     SERVER_ADDR=(`cat ../../common/base_ips.txt`)
     for (( i=0; i<=${SHARD}; i++))
     do
-      echo "BlockBuilder Shard: ${i}"
+      echo "Communicator Shard: ${i}"
       ./_start_cmd.sh ubuntu ${SERVER_ADDR[i]} 0 ${i} 0 1>>../../log/start.log 2>>../../log/start_err.log &
       sleep 0.1s
     done

@@ -1,4 +1,4 @@
-package blockbuilder
+package gateway
 
 import (
 	"encoding/gob"
@@ -24,11 +24,11 @@ type (
 	Gateway struct {
 		node.GatewayNode
 
-		WorkerBuilderTopic               chan interface{}
+		CommunicatorTopic                chan interface{}
 		GatewayTopic                     chan interface{}
-		workerBuilderList                map[types.Shard]string
-		workerBuilderTransports          map[types.Shard]transport.Transport
-		workerSharedVariableList         map[types.Shard][]string
+		CommunicatorList                 map[types.Shard]string
+		CommunicatorTransports           map[types.Shard]transport.Transport
+		shardSharedVariableList          map[types.Shard][]string
 		contractRwSet                    map[common.Address]map[string]types.RwSet
 		sendedTransactionList            map[types.Shard][]common.Hash
 		clientStart                      []types.Shard
@@ -43,11 +43,11 @@ type (
 func NewInitGateway(ip string, shard types.Shard) *Gateway {
 	gw := new(Gateway)
 	gw.GatewayNode = node.NewGatewayNode(ip, shard)
-	gw.WorkerBuilderTopic = make(chan interface{}, 128)
+	gw.CommunicatorTopic = make(chan interface{}, 128)
 	gw.GatewayTopic = make(chan interface{}, 128)
-	gw.workerBuilderList = make(map[types.Shard]string)
-	gw.workerBuilderTransports = make(map[types.Shard]transport.Transport)
-	gw.workerSharedVariableList = make(map[types.Shard][]string)
+	gw.CommunicatorList = make(map[types.Shard]string)
+	gw.CommunicatorTransports = make(map[types.Shard]transport.Transport)
+	gw.shardSharedVariableList = make(map[types.Shard][]string)
 	gw.contractRwSet = make(map[common.Address]map[string]types.RwSet)
 	gw.sendedTransactionList = make(map[types.Shard][]common.Hash)
 	gw.Experiment = make(map[common.Hash]int64)
@@ -56,21 +56,21 @@ func NewInitGateway(ip string, shard types.Shard) *Gateway {
 	gw.savedExperiment = make(map[types.Shard]message.Experiment)
 
 	/* Register to gob en/decoder */
-	gob.Register(message.WorkerSharedVariableRegisterRequest{})
-	gob.Register(message.WorkerBuilderRegister{})
-	gob.Register(message.WorkerSharedVariableRegisterResponse{})
+	gob.Register(message.ShardSharedVariableRegisterRequest{})
+	gob.Register(message.CommunicatorRegister{})
+	gob.Register(message.ShardSharedVariableRegisterResponse{})
 	gob.Register(message.TransactionForm{})
 	gob.Register(message.Transaction{})
-	gob.Register(blockchain.WorkerBlock{})
-	gob.Register(message.WorkerList{})
+	gob.Register(blockchain.ShardBlock{})
+	gob.Register(message.ShardList{})
 	gob.Register(message.ClientStart{})
 	gob.Register(message.Experiment{})
 
 	/* Register message handler */
-	gw.Register(message.WorkerBuilderRegister{}, gw.handleWorkerBuilderRegister)
-	gw.Register(message.WorkerSharedVariableRegisterResponse{}, gw.handleWorkerShardVariableRegisterResponse)
+	gw.Register(message.CommunicatorRegister{}, gw.handleCommunicatorRegister)
+	gw.Register(message.ShardSharedVariableRegisterResponse{}, gw.handleShardShardVariableRegisterResponse)
 	gw.Register(message.TransactionForm{}, gw.handleTransactionForm)
-	gw.Register(blockchain.WorkerBlock{}, gw.handleWorkerBlock)
+	gw.Register(blockchain.ShardBlock{}, gw.handleShardBlock)
 	gw.Register(message.ClientStart{}, gw.handleClientStart)
 	gw.Register(message.Experiment{}, gw.handleExperiment)
 
@@ -118,41 +118,41 @@ func (gw *Gateway) Start() {
 			select {
 			case msg := <-gw.GatewayTopic:
 				switch v := (msg).(type) {
-				case message.WorkerBuilderRegister:
-					gw.workerBuilderList[v.SenderShard] = v.Address
-					log.Debugf("[Gateway] Received register request workerblockbuilder %v", v.SenderShard)
+				case message.CommunicatorRegister:
+					gw.CommunicatorList[v.SenderShard] = v.Address
+					log.Debugf("[Gateway] Received register request Communicator %v", v.SenderShard)
 
-					// request to every worker builder
-					if _, exist := gw.workerBuilderTransports[v.SenderShard]; !exist {
+					// request to every shard communicator
+					if _, exist := gw.CommunicatorTransports[v.SenderShard]; !exist {
 						t := transport.NewTransport(v.Address)
 
 						if err := t.Dial(); err != nil {
 							panic(err)
 						}
-						gw.workerBuilderTransports[v.SenderShard] = t
+						gw.CommunicatorTransports[v.SenderShard] = t
 					}
 
-					gw.workerBuilderTransports[v.SenderShard].Send(message.WorkerSharedVariableRegisterRequest{
+					gw.CommunicatorTransports[v.SenderShard].Send(message.ShardSharedVariableRegisterRequest{
 						Gateway: gw.GetIP(),
 					})
 					log.Debugf("[Gateway] request shared variable to %v shard builder", v.SenderShard)
-					log.Debugf("[Gateway] workerBuilderList: %v", gw.workerBuilderList)
+					log.Debugf("[Gateway] CommunicatorList: %v", gw.CommunicatorList)
 
-				case message.WorkerSharedVariableRegisterResponse:
-					gw.workerSharedVariableList[v.SenderShard] = append(
-						gw.workerSharedVariableList[v.SenderShard],
+				case message.ShardSharedVariableRegisterResponse:
+					gw.shardSharedVariableList[v.SenderShard] = append(
+						gw.shardSharedVariableList[v.SenderShard],
 						v.Variables,
 					)
 					log.Debugf("[Gateway] received builder shard %v shared variable registering %v", v.SenderShard, v.Variables)
 
-					if len(gw.workerBuilderList) == config.GetConfig().ShardCount {
-						workerList := make(message.WorkerList, config.GetConfig().ShardCount)
-						for shard, ip := range gw.workerBuilderList {
-							workerList[shard-1] = ip
+					if len(gw.CommunicatorList) == config.GetConfig().ShardCount {
+						ShardList := make(message.ShardList, config.GetConfig().ShardCount)
+						for shard, ip := range gw.CommunicatorList {
+							ShardList[shard-1] = ip
 						}
-						for shard, tp := range gw.workerBuilderTransports {
-							tp.Send(workerList)
-							log.Debugf("[Gateway] Send to %v shard, list %v", shard, workerList)
+						for shard, tp := range gw.CommunicatorTransports {
+							tp.Send(ShardList)
+							log.Debugf("[Gateway] Send to %v shard, list %v", shard, ShardList)
 						}
 					}
 				case message.ClientStart:
@@ -250,7 +250,7 @@ func (gw *Gateway) Start() {
 								log.Debugf("[Gateway] %v Send Local Transaction Hash: %v, From: %v, To: %v, Value: %v, to shard: %v, RwSet: %v", cnt, tx.Hash, tx.From, tx.To, tx.Value, shardToSend[0], tx.RwSet)
 
 							}
-							gw.workerBuilderTransports[shardToSend[0]].Send(tx)
+							gw.CommunicatorTransports[shardToSend[0]].Send(tx)
 						}
 					default:
 						// Handle Transfer Transactions
@@ -291,9 +291,9 @@ func (gw *Gateway) Start() {
 							gw.sendedTransactionList[shardToSend[0]] = append(gw.sendedTransactionList[shardToSend[0]], tx.Hash)
 							log.Debugf("[Gateway] %v Send Local Transaction Hash: %v, From: %v, To: %v, Value: %v, to shard %v", cnt, tx.Hash, tx.From, tx.To, tx.Value, shardToSend[0])
 						}
-						gw.workerBuilderTransports[shardToSend[0]].Send(tx)
+						gw.CommunicatorTransports[shardToSend[0]].Send(tx)
 					}
-				case blockchain.WorkerBlock:
+				case blockchain.ShardBlock:
 					for _, transaction := range v.Transaction {
 						for index, sendedTrasnasction := range gw.sendedTransactionList[types.Shard(v.Shard)] {
 							if sendedTrasnasction == transaction.Hash {
@@ -365,7 +365,7 @@ func (gw *Gateway) Start() {
 				}
 
 			// drop another topic
-			case <-gw.WorkerBuilderTopic:
+			case <-gw.CommunicatorTopic:
 				continue
 			}
 		}
@@ -373,12 +373,12 @@ func (gw *Gateway) Start() {
 	wg.Wait()
 }
 
-func (gw *Gateway) handleWorkerBuilderRegister(msg message.WorkerBuilderRegister) {
+func (gw *Gateway) handleCommunicatorRegister(msg message.CommunicatorRegister) {
 	// C -> G
 	gw.GatewayTopic <- msg
 }
 
-func (gw *Gateway) handleWorkerShardVariableRegisterResponse(msg message.WorkerSharedVariableRegisterResponse) {
+func (gw *Gateway) handleShardShardVariableRegisterResponse(msg message.ShardSharedVariableRegisterResponse) {
 	// W -> G
 	gw.GatewayTopic <- msg
 }
@@ -388,8 +388,8 @@ func (gw *Gateway) handleTransactionForm(msg message.TransactionForm) {
 	// log.Debugf("Received TransactionForm Message: %v", msg)
 }
 
-func (gw *Gateway) handleWorkerBlock(msg blockchain.WorkerBlock) {
-	// log.Debugf("Received WorkerBlock: %v", msg)
+func (gw *Gateway) handleShardBlock(msg blockchain.ShardBlock) {
+	// log.Debugf("Received ShardBlock: %v", msg)
 	gw.GatewayTopic <- msg
 }
 

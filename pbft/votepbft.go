@@ -361,7 +361,7 @@ func (pb *PBFT) processCertificateTransactionCqc(votingTransaction *message.Sign
 			}
 		}
 
-		pb.SendToBlockBuilder(vote_complete_transaction)
+		pb.SendToCommunicator(vote_complete_transaction)
 		if !vote_complete_transaction.IsCommit {
 			vote_complete_transaction.AbortAndRetryLatencyDissection.RootVoteConsensusTime = time.Now().UnixMilli() - vote_complete_transaction.AbortAndRetryLatencyDissection.RootVoteConsensusTime
 			vote_complete_transaction.LatencyDissection.RootVoteConsensusTime = vote_complete_transaction.LatencyDissection.RootVoteConsensusTime + vote_complete_transaction.AbortAndRetryLatencyDissection.RootVoteConsensusTime
@@ -378,7 +378,7 @@ func (pb *PBFT) processCertificateTransactionCqc(votingTransaction *message.Sign
 				}
 			}
 		}
-		log.VoteDebugf("[%v %v] (processCertificateTransactionCqc) Send Transaction completed consensus To BlockBuilder Tx Hash: %v, Nonce: %v, IsCommit: %v", pb.ID(), pb.Shard(), cqc.TransactionHash, cqc.Nonce, cqc.IsCommit)
+		log.VoteDebugf("[%v %v] (processCertificateTransactionCqc) Send Transaction completed consensus To Communicator Tx Hash: %v, Nonce: %v, IsCommit: %v", pb.ID(), pb.Shard(), cqc.TransactionHash, cqc.Nonce, cqc.IsCommit)
 	} else {
 		pb.agreemu.Unlock()
 	}

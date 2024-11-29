@@ -17,8 +17,8 @@ type TMO struct {
 	NodeID              identity.NodeID
 	BlockHeightLast     types.BlockHeight
 	BlockHeightPrepared types.BlockHeight
-	BlockLast           *blockchain.WorkerBlock
-	BlockPrepared       *blockchain.WorkerBlock
+	BlockLast           *blockchain.ShardBlock
+	BlockPrepared       *blockchain.ShardBlock
 	HighQC              *quorum.QC
 }
 
@@ -29,19 +29,19 @@ type TC struct {
 	NewView        types.View
 	AnchorView     types.View
 	BlockHeightNew types.BlockHeight
-	BlockMax       *blockchain.WorkerBlock
+	BlockMax       *blockchain.ShardBlock
 	crypto.AggSig
 	crypto.Signature
 }
 
-func NewTC(newView types.View, requesters map[identity.NodeID]*TMO) (*TC, *blockchain.WorkerBlock) {
+func NewTC(newView types.View, requesters map[identity.NodeID]*TMO) (*TC, *blockchain.ShardBlock) {
 	// set variable
 	var (
 		shard          types.Shard
 		anchorView     types.View
 		blockHeightNew types.BlockHeight
-		blockMax       *blockchain.WorkerBlock
-		blockPrepared  *blockchain.WorkerBlock
+		blockMax       *blockchain.ShardBlock
+		blockPrepared  *blockchain.ShardBlock
 	)
 
 	var (

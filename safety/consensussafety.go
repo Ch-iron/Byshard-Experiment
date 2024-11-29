@@ -10,9 +10,9 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-type WorkerSafety interface {
-	CreateWorkerBlock() *blockchain.WorkerBlock
-	ProcessWorkerBlock(block *blockchain.WorkerBlock) error
+type ConsensusSafety interface {
+	CreateShardBlock() *blockchain.ShardBlock
+	ProcessShardBlock(block *blockchain.ShardBlock) error
 	ProcessVote(vote *quorum.Vote)
 	ProcessAccept(commit *blockchain.Accept)
 	ProcessRemoteTmo(tmo *pacemaker.TMO)

@@ -14,26 +14,26 @@ import (
 /***************************
  *  paperexperiment Init Related  *
  ***************************/
-type WorkerList []string
+type ShardList []string
 
-type WorkerBuilderRegister struct {
+type CommunicatorRegister struct {
 	SenderShard types.Shard
 	Address     string
 }
 
-type WorkerBuilderListRequest struct {
+type CommunicatorListRequest struct {
 	Gateway string
 }
 
-type WorkerBuilderListResponse struct {
+type CommunicatorListResponse struct {
 	Builders map[types.Shard]string
 }
 
-type WorkerSharedVariableRegisterRequest struct {
+type ShardSharedVariableRegisterRequest struct {
 	Gateway string
 }
 
-type WorkerSharedVariableRegisterResponse struct {
+type ShardSharedVariableRegisterResponse struct {
 	SenderShard types.Shard
 	Variables   string
 }
@@ -179,7 +179,7 @@ type TransactionHeader struct {
 	Proposer identity.NodeID
 }
 
-type BuilderSignedTransaction SignedTransaction
+type CommunicatorSignedTransaction SignedTransaction
 
 type SignedTransaction struct {
 	Transaction
@@ -201,7 +201,7 @@ type RootShardVotedTransaction struct {
 	IsCommit bool
 }
 
-type VoteBuilderSignedTransaction SignedTransaction
+type VoteCommunicatorSignedTransaction SignedTransaction
 
 type VotedTransaction struct {
 	RootShardVotedTransaction

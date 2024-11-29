@@ -14,7 +14,7 @@ import (
 // Node is the primary access point for every replica
 // it includes networking, state machine and RESTful API server
 type GatewayNode interface {
-	socket.BBSocket
+	socket.CommSocket
 	//Database
 	GetIP() string
 	GetShard() types.Shard
@@ -27,7 +27,7 @@ type gatewaynode struct {
 	ip    string
 	shard types.Shard
 
-	socket.BBSocket
+	socket.CommSocket
 	server *http.Server
 
 	//Database
@@ -42,7 +42,7 @@ func NewGatewayNode(ip string, shard types.Shard) GatewayNode {
 	gn := new(gatewaynode)
 	gn.ip = ip
 	gn.shard = shard
-	gn.BBSocket = socket.NewBBSocket(ip, shard, config.Configuration.Addrs)
+	gn.CommSocket = socket.NewCommunicatorSocket(ip, shard, config.Configuration.Addrs)
 	gn.handles = make(map[string]reflect.Value)
 	gn.MessageChan = make(chan interface{}, config.Configuration.ChanBufferSize)
 	return gn

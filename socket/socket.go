@@ -15,12 +15,12 @@ import (
 
 // Socket integrates all networking interface and fault injections
 type Socket interface {
-	GetBlockBuilder() transport.Transport
+	GetCommunicator() transport.Transport
 
 	GetAddresses() map[types.Shard]map[identity.NodeID]string
 
-	// Send to BlockBuilder any interface message
-	SendToBlockBuilder(m interface{})
+	// Send to Communicator any interface message
+	SendToCommunicator(m interface{})
 
 	// Send put message to outbound queue
 	Send(to identity.NodeID, m interface{})
@@ -49,7 +49,7 @@ type Socket interface {
 type socket struct {
 	id           identity.NodeID
 	shard        types.Shard
-	blockbuilder transport.Transport
+	communicator transport.Transport
 	addresses    map[types.Shard]map[identity.NodeID]string
 	nodes        map[identity.NodeID]transport.Transport
 
@@ -74,11 +74,11 @@ func NewSocket(id identity.NodeID, addrs map[types.Shard]map[identity.NodeID]str
 			}
 		}
 	}
-	tmpaddrs[shard][identity.NewNodeID(0)] = addrs[shard][identity.NewNodeID(0)] + strconv.Itoa(3000+int(shard)) // blockbuilder ip
+	tmpaddrs[shard][identity.NewNodeID(0)] = addrs[shard][identity.NewNodeID(0)] + strconv.Itoa(3000+int(shard)) // communicator ip
 	socket := &socket{
 		id:           id,
 		shard:        shard,
-		blockbuilder: transport.NewTransport(tmpaddrs[shard][identity.NewNodeID(0)]),
+		communicator: transport.NewTransport(tmpaddrs[shard][identity.NewNodeID(0)]),
 		addresses:    tmpaddrs,
 		nodes:        make(map[identity.NodeID]transport.Transport),
 		crash:        false,
@@ -87,7 +87,7 @@ func NewSocket(id identity.NodeID, addrs map[types.Shard]map[identity.NodeID]str
 		flaky:        make(map[identity.NodeID]float64),
 	}
 
-	err := utils.Retry(socket.blockbuilder.Dial, 100, time.Duration(50)*time.Millisecond)
+	err := utils.Retry(socket.communicator.Dial, 100, time.Duration(50)*time.Millisecond)
 	if err != nil {
 		panic(err)
 	}
@@ -98,15 +98,15 @@ func NewSocket(id identity.NodeID, addrs map[types.Shard]map[identity.NodeID]str
 	return socket
 }
 
-func (s *socket) GetBlockBuilder() transport.Transport {
-	return s.blockbuilder
+func (s *socket) GetCommunicator() transport.Transport {
+	return s.communicator
 }
 
 func (s *socket) GetAddresses() map[types.Shard]map[identity.NodeID]string {
 	return s.addresses
 }
 
-func (s *socket) SendToBlockBuilder(m interface{}) {
+func (s *socket) SendToCommunicator(m interface{}) {
 	to := identity.NewNodeID(0)
 	if s.crash {
 		return
@@ -126,14 +126,14 @@ func (s *socket) SendToBlockBuilder(m interface{}) {
 		timer := time.NewTimer(time.Duration(delay) * time.Millisecond)
 		go func() {
 			<-timer.C
-			s.blockbuilder.Send(m)
+			s.communicator.Send(m)
 		}()
 		return
 	}
 
 	// latencytimer := utils.GetBetweenShardTimer(s.shard, s.shard)
 	// <-latencytimer.C
-	s.blockbuilder.Send(m)
+	s.communicator.Send(m)
 }
 
 func (s *socket) Send(to identity.NodeID, m interface{}) {

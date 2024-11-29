@@ -1,4 +1,4 @@
-package worker
+package replica
 
 import (
 	"encoding/gob"
@@ -26,7 +26,7 @@ import (
 
 type Replica struct {
 	node.Node
-	safety.WorkerSafety
+	safety.ConsensusSafety
 	election.Election
 	pd                  *mempool.Producer
 	pm                  *pacemaker.Pacemaker
@@ -35,12 +35,12 @@ type Replica struct {
 	isStarted           atomic.Bool
 	isByz               bool
 	timer               *time.Timer // timeout for each view
-	committedBlocks     chan *blockchain.WorkerBlock
-	forkedBlocks        chan *blockchain.WorkerBlock
-	reservedBlock       chan *blockchain.WorkerBlock
+	committedBlocks     chan *blockchain.ShardBlock
+	forkedBlocks        chan *blockchain.ShardBlock
+	reservedBlock       chan *blockchain.ShardBlock
 	eventChan           chan interface{}
-	preparingBlock      *blockchain.WorkerBlock // block waiting for enough lockResponse
-	reservedPreparBlock *blockchain.WorkerBlock // reserved Preparing Block from ViewChange
+	preparingBlock      *blockchain.ShardBlock // block waiting for enough lockResponse
+	reservedPreparBlock *blockchain.ShardBlock // reserved Preparing Block from ViewChange
 	/* for monitoring node statistics */
 	thrus                string
 	lastViewTime         time.Time
@@ -80,9 +80,9 @@ func NewReplica(id identity.NodeID, alg string, isByz bool, shard types.Shard) *
 	r.pt = mempool.NewManageTransactions()
 	r.start = make(chan bool)
 	r.eventChan = make(chan interface{}, 16384)
-	r.committedBlocks = make(chan *blockchain.WorkerBlock, 100)
-	r.forkedBlocks = make(chan *blockchain.WorkerBlock, 100)
-	r.reservedBlock = make(chan *blockchain.WorkerBlock)
+	r.committedBlocks = make(chan *blockchain.ShardBlock, 100)
+	r.forkedBlocks = make(chan *blockchain.ShardBlock, 100)
+	r.reservedBlock = make(chan *blockchain.ShardBlock)
 	r.preparingBlock = nil
 	r.reservedPreparBlock = nil
 	r.blockdatas = mempool.NewProducer()
@@ -90,13 +90,13 @@ func NewReplica(id identity.NodeID, alg string, isByz bool, shard types.Shard) *
 	r.Register(blockchain.Block{}, r.HandleBlock)
 	r.Register(blockchain.Accept{}, r.HandleAccept)
 	r.Register(message.NodeStartMessage{}, r.HandleNodeStartMessage)
-	r.Register(blockchain.WorkerBlock{}, r.HandleWorkerBlock)
+	r.Register(blockchain.ShardBlock{}, r.HandleShardBlock)
 	r.Register(quorum.Vote{}, r.HandleVote)
 	r.Register(quorum.Commit{}, r.HandleCommit)
 	r.Register(pacemaker.TMO{}, r.HandleTmo)
 	r.Register(pacemaker.TC{}, r.HandleTc)
-	r.Register(message.BuilderSignedTransaction{}, r.HandleBuilderSignedTransaction)
-	r.Register(message.VoteBuilderSignedTransaction{}, r.HandleVotingBuilderSignedTransaction)
+	r.Register(message.CommunicatorSignedTransaction{}, r.HandleCommunicatorSignedTransaction)
+	r.Register(message.VoteCommunicatorSignedTransaction{}, r.HandleVotingCommunicatorSignedTransaction)
 	r.Register(message.SignedTransactionWithHeader{}, r.HandleSignedTransactionWithHeader)
 	r.Register(quorum.TransactionVote{}, r.HandleTransactionVote)
 	r.Register(quorum.TransactionCommit{}, r.HandleTransactionCommit)
@@ -120,14 +120,14 @@ func NewReplica(id identity.NodeID, alg string, isByz bool, shard types.Shard) *
 	gob.Register(blockchain.Block{})
 	gob.Register(blockchain.Accept{})
 	gob.Register(message.NodeStartMessage{})
-	gob.Register(blockchain.WorkerBlock{})
+	gob.Register(blockchain.ShardBlock{})
 	gob.Register(quorum.Vote{})
 	gob.Register(quorum.Commit{})
 	gob.Register(pacemaker.TC{})
 	gob.Register(pacemaker.TMO{})
 	gob.Register(message.Transaction{})
-	gob.Register(message.BuilderSignedTransaction{})
-	gob.Register(message.VoteBuilderSignedTransaction{})
+	gob.Register(message.CommunicatorSignedTransaction{})
+	gob.Register(message.VoteCommunicatorSignedTransaction{})
 	gob.Register(message.RootShardVotedTransaction{})
 	gob.Register(message.SignedTransactionWithHeader{})
 	gob.Register(quorum.TransactionVote{})
@@ -148,13 +148,13 @@ func NewReplica(id identity.NodeID, alg string, isByz bool, shard types.Shard) *
 	gob.Register(message.Experiment{})
 
 	// Is there a better way to reduce the number of parameters?
-	r.WorkerSafety = pbft.NewPBFT(r.Node, r.pm, r.pt, r.Election, r.committedBlocks, r.forkedBlocks, r.reservedBlock, r.blockdatas)
+	r.ConsensusSafety = pbft.NewPBFT(r.Node, r.pm, r.pt, r.Election, r.committedBlocks, r.forkedBlocks, r.reservedBlock, r.blockdatas)
 	return r
 }
 
 /* Message Handlers */
 // Block Consensus Process Start
-// Send Block completed consensus to blockbuilder at the process end
+// Send Block completed consensus to communicator at the process end
 func (r *Replica) HandleNodeStartMessage(nodestartmessage message.NodeStartMessage) {
 	log.Debugf("Shard: %v, id: %v Receive Node Start Message", r.Shard(), r.ID())
 
@@ -165,14 +165,14 @@ func (r *Replica) HandleNodeStartMessage(nodestartmessage message.NodeStartMessa
 		log.Debugf("[%v %v] start protocol ", r.ID(), r.Shard())
 		r.pm.AdvanceView(0)
 	}
-	r.SendToBlockBuilder(message.NodeStartAck{
+	r.SendToCommunicator(message.NodeStartAck{
 		ID: r.ID(),
 	})
 }
 
 /* paperexperiment Handlers */
-func (r *Replica) HandleBuilderSignedTransaction(tx message.BuilderSignedTransaction) {
-	// log.Debugf("[HandleBuilderSignedTransaction] Shard: %v, id %v Receive Transaction From BlockBuilder Hash: %v", r.Shard(), r.ID(), tx.Transaction.Hash)
+func (r *Replica) HandleCommunicatorSignedTransaction(tx message.CommunicatorSignedTransaction) {
+	// log.Debugf("[HandleCommunicatorSignedTransaction] Shard: %v, id %v Receive Transaction From Communicator Hash: %v", r.Shard(), r.ID(), tx.Transaction.Hash)
 	r.receivedNo++
 	if !r.IsLeader(r.ID(), r.pm.GetCurView(), r.pm.GetCurEpoch()) {
 		return
@@ -183,10 +183,10 @@ func (r *Replica) HandleBuilderSignedTransaction(tx message.BuilderSignedTransac
 		Proposer: r.ID(),
 	}
 
-	// log.Debugf("[Consensus Leader] Shard: %v, id %v Receive Transaction From BlockBuilder Hash: %v", r.Shard(), r.ID(), tx.Transaction.Hash)
+	// log.Debugf("[Consensus Leader] Shard: %v, id %v Receive Transaction From Communicator Hash: %v", r.Shard(), r.ID(), tx.Transaction.Hash)
 	transactionIsVerified, _ := crypto.PubVerify(tx.Committee_sig[0], crypto.IDToByte(tx.Transaction.Hash))
 	if !transactionIsVerified {
-		log.Errorf("[%v %v] Received a block from blockbuilder with an invalid signature", r.ID(), r.Shard())
+		log.Errorf("[%v %v] Received a block from communicator with an invalid signature", r.ID(), r.Shard())
 		return
 	}
 
@@ -204,8 +204,8 @@ func (r *Replica) HandleBuilderSignedTransaction(tx message.BuilderSignedTransac
 	}
 }
 
-func (r *Replica) HandleVotingBuilderSignedTransaction(tx message.VoteBuilderSignedTransaction) {
-	// log.Debugf("[HandleVotingBuilderSignedTransaction] Shard: %v, id %v Receive Transaction From BlockBuilder Hash: %v", r.Shard(), r.ID(), tx.Transaction.Hash)
+func (r *Replica) HandleVotingCommunicatorSignedTransaction(tx message.VoteCommunicatorSignedTransaction) {
+	// log.Debugf("[HandleVotingCommunicatorSignedTransaction] Shard: %v, id %v Receive Transaction From Communicator Hash: %v", r.Shard(), r.ID(), tx.Transaction.Hash)
 	r.receivedNo++
 	if !r.IsLeader(r.ID(), r.pm.GetCurView(), r.pm.GetCurEpoch()) {
 		return
@@ -216,10 +216,10 @@ func (r *Replica) HandleVotingBuilderSignedTransaction(tx message.VoteBuilderSig
 		Proposer: r.ID(),
 	}
 
-	// log.Debugf("[Consensus Leader] Shard: %v, id %v Receive Transaction From BlockBuilder Hash: %v", r.Shard(), r.ID(), tx.Transaction.Hash)
+	// log.Debugf("[Consensus Leader] Shard: %v, id %v Receive Transaction From Communicator Hash: %v", r.Shard(), r.ID(), tx.Transaction.Hash)
 	transactionIsVerified, _ := crypto.PubVerify(tx.Committee_sig[0], crypto.IDToByte(tx.Transaction.Hash))
 	if !transactionIsVerified {
-		log.Errorf("[%v %v] Received a block from blockbuilder with an invalid signature", r.ID(), r.Shard())
+		log.Errorf("[%v %v] Received a block from communicator with an invalid signature", r.ID(), r.Shard())
 		return
 	}
 
@@ -257,7 +257,7 @@ func (r *Replica) HandleLocalTransactionVote(vote quorum.LocalTransactionVote) {
 	}
 
 	// log.LocalDebugf("[%v %v] (HandleLocalTransactionVote) received vote from [%v], view: %v epoch: %v Hash: %v ordercount: %v", r.ID(), r.Shard(), vote.Voter, vote.View, vote.Epoch, vote.TransactionHash, vote.OrderCount)
-	r.WorkerSafety.ProcessLocalTransactionVote(&vote)
+	r.ConsensusSafety.ProcessLocalTransactionVote(&vote)
 }
 
 func (r *Replica) HandleLocalTransactionCommit(commitMsg quorum.LocalTransactionCommit) {
@@ -266,7 +266,7 @@ func (r *Replica) HandleLocalTransactionCommit(commitMsg quorum.LocalTransaction
 	}
 
 	// log.LocalDebugf("[%v %v] (HandleLocalTransactionCommit) received commit from [%v], view: %v epoch: %v Hash: %v ordercount: %v", r.ID(), r.Shard(), commitMsg.Voter, commitMsg.View, commitMsg.Epoch, commitMsg.TransactionHash, commitMsg.OrderCount)
-	r.WorkerSafety.ProcessLocalTransactionCommit(&commitMsg)
+	r.ConsensusSafety.ProcessLocalTransactionCommit(&commitMsg)
 }
 
 func (r *Replica) HandleTransactionVote(vote quorum.TransactionVote) {
@@ -275,7 +275,7 @@ func (r *Replica) HandleTransactionVote(vote quorum.TransactionVote) {
 	}
 
 	// log.VoteDebugf("[%v %v] (HandleTransactionVote) received vote from [%v], view: %v epoch: %v Hash: %v", r.ID(), r.Shard(), vote.Voter, vote.View, vote.Epoch, vote.TransactionHash)
-	r.WorkerSafety.ProcessTransactionVote(&vote)
+	r.ConsensusSafety.ProcessTransactionVote(&vote)
 }
 
 func (r *Replica) HandleTransactionCommit(commitMsg quorum.TransactionCommit) {
@@ -284,15 +284,15 @@ func (r *Replica) HandleTransactionCommit(commitMsg quorum.TransactionCommit) {
 	}
 
 	// log.VoteDebugf("[%v %v] (HandleTransactionCommit) received commit from [%v], view: %v epoch: %v Hash: %v", r.ID(), r.Shard(), commitMsg.Voter, commitMsg.View, commitMsg.Epoch, commitMsg.TransactionHash)
-	r.WorkerSafety.ProcessTransactionCommit(&commitMsg)
+	r.ConsensusSafety.ProcessTransactionCommit(&commitMsg)
 }
 
 func (r *Replica) HandleTransactionAccept(accept message.TransactionAccept) {
 	log.VoteDebugf("[%v %v] (HandleTransactionAccept) received accept from leader Hash: %v", r.ID(), r.Shard(), accept.Transaction.Hash)
 	if accept.Transaction.IsCrossShardTx {
-		r.WorkerSafety.ProcessTransactionAccept(&accept)
+		r.ConsensusSafety.ProcessTransactionAccept(&accept)
 	} else {
-		r.WorkerSafety.ProcessLocalTransactionAccept(&accept)
+		r.ConsensusSafety.ProcessLocalTransactionAccept(&accept)
 	}
 }
 
@@ -303,7 +303,7 @@ func (r *Replica) HandleVotedTransaction(votedTransaction message.VotedTransacti
 
 	transactionIsVerified, _ := crypto.PubVerify(votedTransaction.Committee_sig[0], crypto.IDToByte(votedTransaction.RootShardVotedTransaction.Hash))
 	if !transactionIsVerified {
-		log.Errorf("[%v %v] (HandleVotedTransaction) Received a block from blockbuilder with an invalid signature", r.ID(), r.Shard())
+		log.Errorf("[%v %v] (HandleVotedTransaction) Received a block from communicator with an invalid signature", r.ID(), r.Shard())
 		return
 	}
 
@@ -313,7 +313,7 @@ func (r *Replica) HandleVotedTransaction(votedTransaction message.VotedTransacti
 		Proposer: r.ID(),
 	}
 
-	// log.DecideDebugf("[%v %v] (HandleVotedTransaction) received votedtransaction from blockbuilder Hash: %v", r.ID(), r.Shard(), votedTransaction.Hash)
+	// log.DecideDebugf("[%v %v] (HandleVotedTransaction) received votedtransaction from communicator Hash: %v", r.ID(), r.Shard(), votedTransaction.Hash)
 	r.InitDecideStep(&message.VotedTransactionWithHeader{
 		Header:      tx_header,
 		Transaction: votedTransaction,
@@ -341,7 +341,7 @@ func (r *Replica) HandleDecideTransactionVote(vote quorum.DecideTransactionVote)
 	}
 
 	// log.DecideDebugf("[%v %v] (HandleDecideTransactionVote) received vote from [%v], view: %v epoch: %v Hash: %v OrderCount: %v", r.ID(), r.Shard(), vote.Voter, vote.View, vote.Epoch, vote.TransactionHash, vote.OrderCount)
-	r.WorkerSafety.ProcessDecideTransactionVote(&vote)
+	r.ConsensusSafety.ProcessDecideTransactionVote(&vote)
 }
 
 func (r *Replica) HandleDecideTransactionCommit(commitMsg quorum.DecideTransactionCommit) {
@@ -350,12 +350,12 @@ func (r *Replica) HandleDecideTransactionCommit(commitMsg quorum.DecideTransacti
 	}
 
 	// log.DecideDebugf("[%v %v] (HandleDecideTransactionCommit) received commit from [%v], view: %v epoch: %v Hash: %v", r.ID(), r.Shard(), commitMsg.Voter, commitMsg.View, commitMsg.Epoch, commitMsg.TransactionHash)
-	r.WorkerSafety.ProcessDecideTransactionCommit(&commitMsg)
+	r.ConsensusSafety.ProcessDecideTransactionCommit(&commitMsg)
 }
 
 func (r *Replica) HandleDecideTransactionAccept(accept message.DecideTransactionAccept) {
 	log.DecideDebugf("[%v %v] (HandleDecideTransactionAccept) received accept from leader Hash: %v", r.ID(), r.Shard(), accept.Transaction.Hash)
-	r.WorkerSafety.ProcessDecideTransactionAccept(&accept)
+	r.ConsensusSafety.ProcessDecideTransactionAccept(&accept)
 }
 
 func (r *Replica) HandleCommittedTransaction(committedTransaction message.CommittedTransaction) {
@@ -365,7 +365,7 @@ func (r *Replica) HandleCommittedTransaction(committedTransaction message.Commit
 
 	transactionIsVerified, _ := crypto.PubVerify(committedTransaction.Committee_sig[0], crypto.IDToByte(committedTransaction.RootShardVotedTransaction.Hash))
 	if !transactionIsVerified {
-		log.Errorf("[%v %v] (HandleCommittedTransaction) Received a block from blockbuilder with an invalid signature", r.ID(), r.Shard())
+		log.Errorf("[%v %v] (HandleCommittedTransaction) Received a block from communicator with an invalid signature", r.ID(), r.Shard())
 		return
 	}
 
@@ -375,7 +375,7 @@ func (r *Replica) HandleCommittedTransaction(committedTransaction message.Commit
 		Proposer: r.ID(),
 	}
 
-	// log.CommitDebugf("[%v %v] (HandleCommittedTransaction) received committedtransaction from blockbuilder Hash: %v", r.ID(), r.Shard(), committedTransaction.Transaction.Hash)
+	// log.CommitDebugf("[%v %v] (HandleCommittedTransaction) received committedtransaction from communicator Hash: %v", r.ID(), r.Shard(), committedTransaction.Transaction.Hash)
 	r.InitCommitStep(&message.CommittedTransactionWithHeader{
 		Header:      tx_header,
 		Transaction: committedTransaction,
@@ -403,7 +403,7 @@ func (r *Replica) HandleCommittedTransactionVote(vote quorum.CommitTransactionVo
 	}
 
 	// log.CommitDebugf("[%v %v] (HandleCommittedTransactionVote) received vote from [%v], view: %v epoch: %v Hash: %v", r.ID(), r.Shard(), vote.Voter, vote.View, vote.Epoch, vote.TransactionHash)
-	r.WorkerSafety.ProcessCommitTransactionVote(&vote)
+	r.ConsensusSafety.ProcessCommitTransactionVote(&vote)
 }
 
 func (r *Replica) HandleCommittedTransactionCommit(commitMsg quorum.CommitTransactionCommit) {
@@ -412,16 +412,16 @@ func (r *Replica) HandleCommittedTransactionCommit(commitMsg quorum.CommitTransa
 	}
 
 	// log.CommitDebugf("[%v %v] (HandleCommittedTransactionCommit) received commit from [%v], view: %v epoch: %v Hash: %v", r.ID(), r.Shard(), commitMsg.Voter, commitMsg.View, commitMsg.Epoch, commitMsg.TransactionHash)
-	r.WorkerSafety.ProcessCommitTransactionCommit(&commitMsg)
+	r.ConsensusSafety.ProcessCommitTransactionCommit(&commitMsg)
 }
 
 func (r *Replica) HandleCommittedTransactionAccept(accept message.CommitTransactionAccept) {
 	log.CommitDebugf("[%v %v] (HandleCommittedTransactionAccept) received accept from leader Hash: %v", r.ID(), r.Shard(), accept.Transaction.Hash)
-	r.WorkerSafety.ProcessCommitTransactionAccept(&accept)
+	r.ConsensusSafety.ProcessCommitTransactionAccept(&accept)
 }
 
 /* Block Handlers */
-func (r *Replica) HandleWorkerBlock(block blockchain.WorkerBlock) {
+func (r *Replica) HandleShardBlock(block blockchain.ShardBlock) {
 	if !r.IsCommittee(r.ID(), block.Block_header.Epoch_num) {
 		return
 	}
@@ -536,7 +536,7 @@ func (r *Replica) processNewView(curEpoch types.Epoch, curView types.View) {
 func (r *Replica) initConsensus(epoch types.Epoch, view types.View) {
 	createStart := time.Now()
 	var (
-		block *blockchain.WorkerBlock
+		block *blockchain.ShardBlock
 	)
 
 	if block == nil {
@@ -554,12 +554,12 @@ func (r *Replica) initConsensus(epoch types.Epoch, view types.View) {
 	r.totalCreateDuration += createDuration
 
 	r.BroadcastToSome(r.FindCommitteesFor(block.Block_header.Epoch_num), block)
-	// _ = r.WorkerSafety.ProcessWorkerBlock(block)
+	// _ = r.ConsensusSafety.ProcessShardBlock(block)
 	r.voteStart = time.Now()
 	r.preparingBlock = nil
 }
 
-func (r *Replica) processCommittedBlock(block *blockchain.WorkerBlock) {
+func (r *Replica) processCommittedBlock(block *blockchain.ShardBlock) {
 	r.committedNo++
 	log.Infof("[%v %v] (processCommittedBlock) block is committed No. of transactions: , blockheight %v view %v epoch %v, id: %v", r.ID(), r.Shard(), block.Block_header.Block_height, block.Block_header.View_num, block.Block_header.Epoch_num, block.Block_hash)
 
@@ -568,7 +568,7 @@ func (r *Replica) processCommittedBlock(block *blockchain.WorkerBlock) {
 	}
 }
 
-func (r *Replica) processForkedBlock(block *blockchain.WorkerBlock) {}
+func (r *Replica) processForkedBlock(block *blockchain.ShardBlock) {}
 
 /* Listners */
 
@@ -634,7 +634,7 @@ func (r *Replica) ListenLocalEvent() {
 				// Not ViewChange State: f + 1 tmo obtained : B cond
 				// ViewChange State: higher anchorview tmo obtained : D cond
 				log.Debugf("[%v %v] view-change start on for newview %v", r.ID(), r.Shard(), newView)
-				r.WorkerSafety.ProcessLocalTmo(r.pm.GetCurView())
+				r.ConsensusSafety.ProcessLocalTmo(r.pm.GetCurView())
 				break L
 			case <-r.timer.C:
 				// already in viewchange state : C cond
@@ -643,7 +643,7 @@ func (r *Replica) ListenLocalEvent() {
 				if r.State() == types.VIEWCHANGING {
 					r.pm.UpdateNewView(r.pm.GetNewView() + 1)
 				}
-				r.WorkerSafety.ProcessLocalTmo(r.pm.GetCurView())
+				r.ConsensusSafety.ProcessLocalTmo(r.pm.GetCurView())
 
 				break L
 			}
@@ -678,13 +678,13 @@ func (r *Replica) Start(wg *sync.WaitGroup) {
 		go func() {
 			for range interval.C {
 				log.Debugf("[%v %v] Start CreateBlock!!!!!", r.ID(), r.Shard())
-				block := r.WorkerSafety.CreateWorkerBlock()
+				block := r.ConsensusSafety.CreateShardBlock()
 				block.Proposer = r.ID()
 				leader_signature, _ := crypto.PrivSign(crypto.IDToByte(block.Block_hash), nil)
 				block.Committee_sig = append(block.Committee_sig, leader_signature)
 
 				r.BroadcastToSome(r.FindCommitteesFor(block.Block_header.Epoch_num), block)
-				_ = r.WorkerSafety.ProcessWorkerBlock(block)
+				_ = r.ConsensusSafety.ProcessShardBlock(block)
 				r.voteStart = time.Now()
 				r.preparingBlock = nil
 			}
@@ -698,24 +698,24 @@ func (r *Replica) Start(wg *sync.WaitGroup) {
 			switch v := event.(type) {
 			case types.EpochView:
 				r.initConsensus(v.Epoch, v.View)
-			case blockchain.WorkerBlock:
-				_ = r.WorkerSafety.ProcessWorkerBlock(&v)
+			case blockchain.ShardBlock:
+				_ = r.ConsensusSafety.ProcessShardBlock(&v)
 				r.voteStart = time.Now()
 				r.processedNo++
 			case quorum.Vote:
 				startProcessTime := time.Now()
-				r.WorkerSafety.ProcessVote(&v)
+				r.ConsensusSafety.ProcessVote(&v)
 				processingDuration := time.Since(startProcessTime)
 				r.totalVoteTime += processingDuration
 				r.voteNo++
 			case quorum.Commit:
-				r.WorkerSafety.ProcessCommit(&v)
+				r.ConsensusSafety.ProcessCommit(&v)
 			case blockchain.Accept:
-				r.WorkerSafety.ProcessAccept(&v)
+				r.ConsensusSafety.ProcessAccept(&v)
 			case pacemaker.TMO:
-				r.WorkerSafety.ProcessRemoteTmo(&v)
+				r.ConsensusSafety.ProcessRemoteTmo(&v)
 			case pacemaker.TC:
-				r.WorkerSafety.ProcessTC(&v)
+				r.ConsensusSafety.ProcessTC(&v)
 			}
 		}
 	}()

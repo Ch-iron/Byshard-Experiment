@@ -1,4 +1,4 @@
-package blockbuilder
+package communicator
 
 import (
 	"encoding/gob"
@@ -20,16 +20,11 @@ import (
 )
 
 type (
-	/*
-		1. (worker builder) connect to coordination shard with hard-coded address
-		2. construct shard network
-		3. construct block builder network
-	*/
-	WorkerBlockBuilderReplica struct {
-		node.BlockBuilder
+	CommunicatorReplica struct {
+		node.Communicator
 		gatewaynodeTransport transport.Transport
 		// This channel pass pointer of message struct. Topic name is decided by who is receiver
-		WorkerBuilderTopic        chan interface{}
+		CommunicatorTopic         chan interface{}
 		RootShardVotedTransaction chan interface{}
 		CommittedTransaction      chan interface{}
 		GatewayTopic              chan interface{}
@@ -40,12 +35,12 @@ type (
 	}
 )
 
-func NewWorkerBlockBuilder(ip string, shard types.Shard) *WorkerBlockBuilderReplica {
-	r := new(WorkerBlockBuilderReplica)
+func NewCommunicator(ip string, shard types.Shard) *CommunicatorReplica {
+	r := new(CommunicatorReplica)
 	addrs := config.Configuration.Addrs
 	r.gatewaynodeTransport = transport.NewTransport(addrs[types.Shard(0)][identity.NewNodeID(0)] + "2999")
-	r.BlockBuilder = node.NewWorkerBlockBuilder(ip, shard)
-	r.WorkerBuilderTopic = make(chan interface{}, 16384)
+	r.Communicator = node.NewCommunicator(ip, shard)
+	r.CommunicatorTopic = make(chan interface{}, 16384)
 	r.RootShardVotedTransaction = make(chan interface{}, 10240)
 	r.CommittedTransaction = make(chan interface{}, 10240)
 	r.GatewayTopic = make(chan interface{}, 128)
@@ -55,30 +50,30 @@ func NewWorkerBlockBuilder(ip string, shard types.Shard) *WorkerBlockBuilderRepl
 	r.txcnt = 0
 
 	/* Register to gob en/decoder */
-	gob.Register(message.WorkerBuilderRegister{})
-	gob.Register(message.WorkerBuilderListResponse{})
-	gob.Register(message.WorkerSharedVariableRegisterRequest{})
-	gob.Register(message.WorkerSharedVariableRegisterResponse{})
-	gob.Register(message.WorkerList{})
+	gob.Register(message.CommunicatorRegister{})
+	gob.Register(message.CommunicatorListResponse{})
+	gob.Register(message.ShardSharedVariableRegisterRequest{})
+	gob.Register(message.ShardSharedVariableRegisterResponse{})
+	gob.Register(message.ShardList{})
 	gob.Register(message.ConsensusNodeRegister{})
 	gob.Register(message.Transaction{})
 	gob.Register(message.RootShardVotedTransaction{})
 	gob.Register(message.VotedTransaction{})
 	gob.Register(message.CommittedTransaction{})
 	gob.Register(message.CompleteTransaction{})
-	gob.Register(blockchain.WorkerBlock{})
+	gob.Register(blockchain.ShardBlock{})
 	gob.Register(message.NodeStartMessage{})
 	gob.Register(message.NodeStartAck{})
 	gob.Register(message.ClientStart{})
-	gob.Register(message.BuilderSignedTransaction{})
-	gob.Register(message.VoteBuilderSignedTransaction{})
+	gob.Register(message.CommunicatorSignedTransaction{})
+	gob.Register(message.VoteCommunicatorSignedTransaction{})
 	gob.Register(message.VotedTransaction{})
 	gob.Register(message.CommittedTransaction{})
 	gob.Register(message.Experiment{})
 
 	/* Register message handler */
-	r.Register(message.WorkerSharedVariableRegisterRequest{}, r.handleWorkerShardVariableRegisterRequest)
-	r.Register(message.WorkerList{}, r.handleWorkerList)
+	r.Register(message.ShardSharedVariableRegisterRequest{}, r.handleShardVariableRegisterRequest)
+	r.Register(message.ShardList{}, r.handleShardList)
 	r.Register(message.ConsensusNodeRegister{}, r.handleConsensusRegister)
 	r.Register(message.NodeStartAck{}, r.handleNodeStartAck)
 	r.Register(message.Transaction{}, r.handleTransaction)
@@ -86,13 +81,13 @@ func NewWorkerBlockBuilder(ip string, shard types.Shard) *WorkerBlockBuilderRepl
 	r.Register(message.VotedTransaction{}, r.handleVotedTransaction)
 	r.Register(message.CommittedTransaction{}, r.handleCommittedTransaction)
 	r.Register(message.CompleteTransaction{}, r.handleConsensusCompleteTransaction)
-	r.Register(blockchain.WorkerBlock{}, r.handleWorkerBlock)
+	r.Register(blockchain.ShardBlock{}, r.handleShardBlock)
 	r.Register(message.Experiment{}, r.handleExperiment)
 
 	return r
 }
 
-func (r *WorkerBlockBuilderReplica) Start() {
+func (r *CommunicatorReplica) Start() {
 	go r.Run()
 	err := utils.Retry(r.gatewaynodeTransport.Dial, 100, time.Duration(50)*time.Millisecond)
 	if err != nil {
@@ -100,7 +95,7 @@ func (r *WorkerBlockBuilderReplica) Start() {
 	}
 }
 
-func (r *WorkerBlockBuilderReplica) IsExist(address common.Address) bool {
+func (r *CommunicatorReplica) IsExist(address common.Address) bool {
 	var addressList []common.Address
 	addressList = append(addressList, address)
 	if utils.CalculateShardToSend(addressList)[0] == r.GetShard() {
@@ -111,46 +106,46 @@ func (r *WorkerBlockBuilderReplica) IsExist(address common.Address) bool {
 }
 
 /* Node Start */
-func (r *WorkerBlockBuilderReplica) SendNodeStartMessage() {
+func (r *CommunicatorReplica) SendNodeStartMessage() {
 	nodeStartMessage := message.NodeStartMessage{
 		Message: "Start",
 	}
 	r.Broadcast(nodeStartMessage)
-	log.Debugf("[Worker BlockBuilder %v] (SendNodeStartMessage) Send To Consensus Node Start Block Create", r.GetShard())
+	log.Debugf("[Communicator %v] (SendNodeStartMessage) Send To Consensus Node Start Block Create", r.GetShard())
 }
 
 /* Message Handler */
-func (r *WorkerBlockBuilderReplica) handleWorkerList(msg message.WorkerList) {
-	r.WorkerBuilderTopic <- msg
+func (r *CommunicatorReplica) handleShardList(msg message.ShardList) {
+	r.CommunicatorTopic <- msg
 }
 
-func (r *WorkerBlockBuilderReplica) handleWorkerShardVariableRegisterRequest(msg message.WorkerSharedVariableRegisterRequest) {
+func (r *CommunicatorReplica) handleShardVariableRegisterRequest(msg message.ShardSharedVariableRegisterRequest) {
 	// G -> W
-	r.WorkerBuilderTopic <- msg
+	r.CommunicatorTopic <- msg
 }
 
-func (r *WorkerBlockBuilderReplica) handleConsensusRegister(msg message.ConsensusNodeRegister) {
+func (r *CommunicatorReplica) handleConsensusRegister(msg message.ConsensusNodeRegister) {
 	r.ConsensusNodeTopic <- msg
 }
 
-func (r *WorkerBlockBuilderReplica) handleNodeStartAck(msg message.NodeStartAck) {
+func (r *CommunicatorReplica) handleNodeStartAck(msg message.NodeStartAck) {
 	r.ConsensusNodeTopic <- msg
 }
 
 /* paperexperiment Transaction Consensus */
-func (r *WorkerBlockBuilderReplica) handleTransaction(tx message.Transaction) {
-	log.Debugf("[WorkerBlockBuilder %v] Receive Transaction Hash: %v, Nonce: %v", r.GetShard(), tx.Hash, tx.Nonce)
+func (r *CommunicatorReplica) handleTransaction(tx message.Transaction) {
+	log.Debugf("[Communicator %v] Receive Transaction Hash: %v, Nonce: %v", r.GetShard(), tx.Hash, tx.Nonce)
 	if tx.AbortAndRetryLatencyDissection.BlockWaitingTime == 0 {
 		tx.AbortAndRetryLatencyDissection.BlockWaitingTime = time.Now().UnixMilli()
 	}
 	if !tx.IsCrossShardTx {
 		r.txcnt++
-		// log.Debugf("[WorkerBlockBuilder %v] %vth Receive Transaction!!!! Tx: Hash: %v IsCross: %v, TXType: %v, From %v, To: %v, RwSet: %v", r.GetShard(), r.txcnt, tx.Hash, tx.IsCrossShardTx, tx.TXType, tx.From, tx.To, tx.RwSet)
-		// log.Debugf("[WorkerBlockBuilder %v] Start Local paperexperiment Protocol!!!", r.GetShard())
+		// log.Debugf("[Communicator %v] %vth Receive Transaction!!!! Tx: Hash: %v IsCross: %v, TXType: %v, From %v, To: %v, RwSet: %v", r.GetShard(), r.txcnt, tx.Hash, tx.IsCrossShardTx, tx.TXType, tx.From, tx.To, tx.RwSet)
+		// log.Debugf("[Communicator %v] Start Local paperexperiment Protocol!!!", r.GetShard())
 
 		// Builder Sign Transaction
 		builder_signature, _ := crypto.PrivSign(crypto.IDToByte(tx.Hash), nil)
-		signed_transaction := message.BuilderSignedTransaction{
+		signed_transaction := message.CommunicatorSignedTransaction{
 			Transaction: tx,
 		}
 		signed_transaction.Committee_sig = append(signed_transaction.Committee_sig, builder_signature)
@@ -161,11 +156,11 @@ func (r *WorkerBlockBuilderReplica) handleTransaction(tx message.Transaction) {
 			r.txcnt++
 			tx.StartTime = time.Now().UnixMilli()
 			// Start paperexperiment protocol
-			// log.Debugf("[WorkerBlockBuilder %v] %vth Receive Transaction!!!! Tx: Hash: %v IsCross: %v, TXType: %v, From %v, To: %v, RwSet: %v", r.GetShard(), r.txcnt, tx.Hash, tx.IsCrossShardTx, tx.TXType, tx.From, tx.To, tx.RwSet)
-			// log.Debugf("[WorkerBlockBuilder %v] Start paperexperiment Protocol!!!", r.GetShard())
+			// log.Debugf("[Communicator %v] %vth Receive Transaction!!!! Tx: Hash: %v IsCross: %v, TXType: %v, From %v, To: %v, RwSet: %v", r.GetShard(), r.txcnt, tx.Hash, tx.IsCrossShardTx, tx.TXType, tx.From, tx.To, tx.RwSet)
+			// log.Debugf("[Communicator %v] Start paperexperiment Protocol!!!", r.GetShard())
 			// Builder Sign Transaction
 			builder_signature, _ := crypto.PrivSign(crypto.IDToByte(tx.Hash), nil)
-			signed_transaction := message.BuilderSignedTransaction{
+			signed_transaction := message.CommunicatorSignedTransaction{
 				Transaction: tx,
 			}
 			signed_transaction.Committee_sig = append(signed_transaction.Committee_sig, builder_signature)
@@ -185,11 +180,11 @@ func (r *WorkerBlockBuilderReplica) handleTransaction(tx message.Transaction) {
 			tx.AbortAndRetryLatencyDissection.Network1 = time.Now().UnixMilli() - tx.AbortAndRetryLatencyDissection.Network1
 			tx.LatencyDissection.Network1 = tx.LatencyDissection.Network1 + tx.AbortAndRetryLatencyDissection.Network1
 			tx.AbortAndRetryLatencyDissection.VoteConsensusTime = time.Now().UnixMilli()
-			// log.Debugf("[WorkerBlockBuilder %v] Receive Transaction From Root Shard!!! Tx: Hash: %v IsCross: %v, TXType: %v, From %v, To: %v, RwSet: %v", r.GetShard(), tx.Hash, tx.IsCrossShardTx, tx.TXType, tx.From, tx.To, tx.RwSet)
-			// log.Debugf("[WorkerBlockBuilder %v] Start Vote Process!!!", r.GetShard())
+			// log.Debugf("[Communicator %v] Receive Transaction From Root Shard!!! Tx: Hash: %v IsCross: %v, TXType: %v, From %v, To: %v, RwSet: %v", r.GetShard(), tx.Hash, tx.IsCrossShardTx, tx.TXType, tx.From, tx.To, tx.RwSet)
+			// log.Debugf("[Communicator %v] Start Vote Process!!!", r.GetShard())
 			// Builder Sign Transaction
 			builder_signature, _ := crypto.PrivSign(crypto.IDToByte(tx.Hash), nil)
-			signed_transaction := message.VoteBuilderSignedTransaction{
+			signed_transaction := message.VoteCommunicatorSignedTransaction{
 				Transaction: tx,
 			}
 			signed_transaction.Committee_sig = append(signed_transaction.Committee_sig, builder_signature)
@@ -200,8 +195,8 @@ func (r *WorkerBlockBuilderReplica) handleTransaction(tx message.Transaction) {
 }
 
 // Receive Transaction completed consensus from consensus nodes in root shard
-func (r *WorkerBlockBuilderReplica) handleRootShardVotedTransaction(tx message.RootShardVotedTransaction) {
-	log.Infof("[Worker BlockBuilder %v] Receive Consensus Complete Transaction From Consensus Node TxHash: %v", r.GetShard(), tx.Transaction.Hash)
+func (r *CommunicatorReplica) handleRootShardVotedTransaction(tx message.RootShardVotedTransaction) {
+	log.Infof("[Communicator %v] Receive Consensus Complete Transaction From Consensus Node TxHash: %v", r.GetShard(), tx.Transaction.Hash)
 	if r.IsRootShard(&tx.Transaction) {
 		if tx.IsCommit {
 			r.RootShardVotedTransaction <- tx
@@ -211,8 +206,8 @@ func (r *WorkerBlockBuilderReplica) handleRootShardVotedTransaction(tx message.R
 	}
 }
 
-func (r *WorkerBlockBuilderReplica) handleVotedTransaction(tx message.VotedTransaction) {
-	log.Infof("[Worker BlockBuilder %v] Receive Voted Transaction From Other Shard TxHash: %v", r.GetShard(), tx.Transaction.Hash)
+func (r *CommunicatorReplica) handleVotedTransaction(tx message.VotedTransaction) {
+	log.Infof("[Communicator %v] Receive Voted Transaction From Other Shard TxHash: %v", r.GetShard(), tx.Transaction.Hash)
 	tx.AbortAndRetryLatencyDissection.Network2 = time.Now().UnixMilli() - tx.AbortAndRetryLatencyDissection.Network2
 	tx.LatencyDissection.Network2 = tx.LatencyDissection.Network2 + tx.AbortAndRetryLatencyDissection.Network2
 	tx.Transaction.AbortAndRetryLatencyDissection.DecideConsensusTime = time.Now().UnixMilli()
@@ -222,12 +217,12 @@ func (r *WorkerBlockBuilderReplica) handleVotedTransaction(tx message.VotedTrans
 	r.Broadcast(tx)
 }
 
-func (r *WorkerBlockBuilderReplica) handleCommittedTransaction(tx message.CommittedTransaction) {
+func (r *CommunicatorReplica) handleCommittedTransaction(tx message.CommittedTransaction) {
 	if r.IsRootShard(&tx.Transaction) {
 		tx.AbortAndRetryLatencyDissection.DecideConsensusTime = time.Now().UnixMilli() - tx.AbortAndRetryLatencyDissection.DecideConsensusTime
 		tx.LatencyDissection.DecideConsensusTime = tx.LatencyDissection.DecideConsensusTime + tx.AbortAndRetryLatencyDissection.DecideConsensusTime
 		tx.AbortAndRetryLatencyDissection.Network3 = time.Now().UnixMilli()
-		log.DecideDebugf("[Worker BlockBuilder %v] Receive Committed Transaction TxHash: %v", r.GetShard(), tx.Transaction.Hash)
+		log.DecideDebugf("[Communicator %v] Receive Committed Transaction TxHash: %v", r.GetShard(), tx.Transaction.Hash)
 		r.CommittedTransaction <- tx
 	} else {
 		var root_shard []types.Shard
@@ -240,7 +235,7 @@ func (r *WorkerBlockBuilderReplica) handleCommittedTransaction(tx message.Commit
 		root_shard = utils.CalculateShardToSend(root_address)
 		latencyTimer := utils.GetBetweenShardTimer(r.GetShard(), root_shard[0])
 		<-latencyTimer.C
-		log.DecideDebugf("[Worker BlockBuilder %v] Receive Committed Transaction from Root shard TxHash: %v", r.GetShard(), tx.Transaction.Hash)
+		log.DecideDebugf("[Communicator %v] Receive Committed Transaction from Root shard TxHash: %v", r.GetShard(), tx.Transaction.Hash)
 	}
 	tx.AbortAndRetryLatencyDissection.Network3 = time.Now().UnixMilli() - tx.AbortAndRetryLatencyDissection.Network3
 	tx.LatencyDissection.Network3 = tx.LatencyDissection.Network3 + tx.AbortAndRetryLatencyDissection.Network3
@@ -250,33 +245,33 @@ func (r *WorkerBlockBuilderReplica) handleCommittedTransaction(tx message.Commit
 	r.Broadcast(tx)
 }
 
-func (r *WorkerBlockBuilderReplica) handleConsensusCompleteTransaction(tx message.CompleteTransaction) {
-	log.CommitDebugf("[Worker BlockBuilder %v] Complete Transaction TxHash: %v", r.GetShard(), tx.Transaction.Hash)
+func (r *CommunicatorReplica) handleConsensusCompleteTransaction(tx message.CompleteTransaction) {
+	log.CommitDebugf("[Communicator %v] Complete Transaction TxHash: %v", r.GetShard(), tx.Transaction.Hash)
 	r.AddCommittedTransaction(&tx.Transaction)
 }
 
-// Receive WorkerBlock completed consensus
-func (r *WorkerBlockBuilderReplica) handleWorkerBlock(msg blockchain.WorkerBlock) {
-	log.Infof("[Worker BlockBuilder %v] Receive Workerblock From ID: %v Blockhash: %v", r.GetShard(), msg.Proposer, msg.Block_hash)
+// Receive ShardBlock completed consensus
+func (r *CommunicatorReplica) handleShardBlock(msg blockchain.ShardBlock) {
+	log.Infof("[Communicator %v] Receive ShardBlock From ID: %v Blockhash: %v", r.GetShard(), msg.Proposer, msg.Block_hash)
 	r.gatewaynodeTransport.Send(msg)
 	r.SetBlockHeight(r.GetBlockHeight() + 1)
 	// only logging
-	// log.Errorf("[Worker BlockBuilder %v] State Commit Start BlockHeight %v", r.GetShard(), msg.Block_header.Block_height)
+	// log.Errorf("[Communicator %v] State Commit Start BlockHeight %v", r.GetShard(), msg.Block_header.Block_height)
 	cross := 0
 	for _, tx := range msg.Transaction {
 		if tx.IsCrossShardTx {
 			cross++
 		}
 	}
-	log.PerformanceInfof("[Worker BlockBuilder %v] Final Block 블록번호: %v, 크로스: %v, 로컬: %v, 전체: %v", r.GetShard(), msg.Block_header.Block_height, cross, len(msg.Transaction)-cross, len(msg.Transaction))
+	log.PerformanceInfof("[Communicator %v] Final Block 블록번호: %v, 크로스: %v, 로컬: %v, 전체: %v", r.GetShard(), msg.Block_header.Block_height, cross, len(msg.Transaction)-cross, len(msg.Transaction))
 	// only logging
 	// for _, lt := range msg.Transaction {
-	// 	log.PerformanceInfof("[Worker BlockBuilder %v] Final Committed Transaction Hash: %v", r.GetShard(), lt.Hash)
+	// 	log.PerformanceInfof("[Communicator %v] Final Committed Transaction Hash: %v", r.GetShard(), lt.Hash)
 	// }
 	// only logging
-	// log.PerformanceInfof("[Worker BlockBuilder %v] 남은 글로벌 시퀀스 수: %v, 남은 글로벌 스냅샷 수: %v", r.GetShard(), len(r.GetGlobalSequence()), len(r.GetGlobalSnapshot()))
+	// log.PerformanceInfof("[Communicator %v] 남은 글로벌 시퀀스 수: %v, 남은 글로벌 스냅샷 수: %v", r.GetShard(), len(r.GetGlobalSequence()), len(r.GetGlobalSnapshot()))
 }
 
-func (r *WorkerBlockBuilderReplica) handleExperiment(msg message.Experiment) {
-	r.WorkerBuilderTopic <- msg
+func (r *CommunicatorReplica) handleExperiment(msg message.Experiment) {
+	r.CommunicatorTopic <- msg
 }

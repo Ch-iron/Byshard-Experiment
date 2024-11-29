@@ -22,9 +22,9 @@ type TransactionId common.Hash
 // Sequence is array of TransactionId
 type Sequence []*message.Transaction
 
-type WorkerBlock struct {
+type ShardBlock struct {
 	Shard         types.Shard
-	Block_header  *WorkerBlockHeader
+	Block_header  *ShardBlockHeader
 	Block_hash    common.Hash
 	Transaction   []*message.Transaction
 	Committee_sig []crypto.Signature
@@ -34,7 +34,7 @@ type WorkerBlock struct {
 	Proposer identity.NodeID
 }
 
-type WorkerBlockHeader struct {
+type ShardBlockHeader struct {
 	Epoch_num       types.Epoch
 	View_num        types.View
 	State_root      common.Hash
@@ -44,34 +44,34 @@ type WorkerBlockHeader struct {
 }
 
 // MakeBlock creates an unsigned block
-// func CreateWorkerBlockData(cross_payload []*message.Transaction, local_payload []*message.Transaction) *WorkerBlockData {
-// 	b := new(WorkerBlockData)
+// func CreateShardBlockData(cross_payload []*message.Transaction, local_payload []*message.Transaction) *ShardBlockData {
+// 	b := new(ShardBlockData)
 // 	b.Cross_transaction = cross_payload
 // 	b.Local_transaction = local_payload
 
 // 	return b
 // }
 
-func CreateWorkerBlock(committed_transaction []*message.Transaction, epoch types.Epoch, view types.View, state_root common.Hash, prev_block_hash common.Hash, current_blockheight types.BlockHeight, qc *quorum.QC, shard types.Shard) *WorkerBlock {
-	block_header := &WorkerBlockHeader{
+func CreateShardBlock(committed_transaction []*message.Transaction, epoch types.Epoch, view types.View, state_root common.Hash, prev_block_hash common.Hash, current_blockheight types.BlockHeight, qc *quorum.QC, shard types.Shard) *ShardBlock {
+	block_header := &ShardBlockHeader{
 		Epoch_num:       epoch,
 		View_num:        view,
 		State_root:      state_root,
 		Prev_block_hash: prev_block_hash,
 		Block_height:    current_blockheight + 1,
 	}
-	workerblock := new(WorkerBlock)
-	workerblock.Shard = shard
-	workerblock.Block_header = block_header
-	workerblock.Block_hash = workerblock.MakeHash(workerblock.Block_header)
-	workerblock.Transaction = committed_transaction
-	// workerblock.Committee_sig = blockwithoutheader.Committee_sig
-	workerblock.QC = qc
+	ShardBlock := new(ShardBlock)
+	ShardBlock.Shard = shard
+	ShardBlock.Block_header = block_header
+	ShardBlock.Block_hash = ShardBlock.MakeHash(ShardBlock.Block_header)
+	ShardBlock.Transaction = committed_transaction
+	// ShardBlock.Committee_sig = blockwithoutheader.Committee_sig
+	ShardBlock.QC = qc
 
-	return workerblock
+	return ShardBlock
 }
 
-func (wb *WorkerBlock) MakeHash(b interface{}) common.Hash {
+func (wb *ShardBlock) MakeHash(b interface{}) common.Hash {
 	return crypto.MakeID(b)
 }
 
@@ -146,7 +146,7 @@ func (b *Block) makeID(nodeID identity.NodeID) {
 }
 
 type Accept struct {
-	CommittedBlock *WorkerBlock
+	CommittedBlock *ShardBlock
 	*quorum.QC
 	Timestamp time.Time
 }

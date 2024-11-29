@@ -11,7 +11,7 @@ if [ -z "${SERVER_PID}" ]; then
         ./server -sim=false -mode=gateway -shard=${SHARD} -id=${ID} 2> error.log &
     else
         if [ ${ID} -eq 0 ]; then
-            ./server -sim=false -mode=blockbuilder -shard=${SHARD} -id=${ID} 2> error.log &
+            ./server -sim=false -mode=communicator -shard=${SHARD} -id=${ID} 2> error.log &
         else
             ./server -sim=false -mode=node -shard=${SHARD} -id=${ID} 2> error.log &
         fi

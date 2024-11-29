@@ -126,7 +126,7 @@ func (c *HTTPClient) RESTPut(key db.Key, value db.Value, shards []types.Shard) e
 		for _, shard := range shards {
 			wait.Add(1)
 			go func(shard types.Shard) {
-				err = c.ABlockBuilderPut(key, value, shard)
+				err = c.ACommunicatorPut(key, value, shard)
 				wait.Done()
 			}(shard)
 		}
@@ -204,7 +204,7 @@ func (c *HTTPClient) AShardPut(key db.Key, value db.Value, shard types.Shard) er
 	return err
 }
 
-func (c *HTTPClient) ABlockBuilderPut(key db.Key, value db.Value, shard types.Shard) error {
+func (c *HTTPClient) ACommunicatorPut(key db.Key, value db.Value, shard types.Shard) error {
 	var wait sync.WaitGroup
 	var err error
 

@@ -52,11 +52,11 @@ func NewLeveledForest() *LeveledForest {
 }
 
 // PruneUpToLevel prunes all blocks UP TO but NOT INCLUDING `level`
-func (f *LeveledForest) PruneUpToLevel(level uint64) ([]*WorkerBlock, int, error) {
+func (f *LeveledForest) PruneUpToLevel(level uint64) ([]*ShardBlock, int, error) {
 	// 1. find committed levels
 	// 2. go through each level and prune, if it is not committed, add it to pruned
 	var prunedBlockNo int
-	forkedBlocks := make([]*WorkerBlock, 0)
+	forkedBlocks := make([]*ShardBlock, 0)
 	committedLevels := make(map[uint64]bool)
 	if level < f.LowestLevel {
 		return nil, prunedBlockNo, fmt.Errorf("new lowest level %d cannot be smaller than previous last retained level %d", level, f.LowestLevel)

@@ -391,8 +391,8 @@ func (pb *PBFT) processCertificateDecideCqc(decidingTransaction *message.VotedTr
 		} else {
 			vote_complete_transaction.RootShardVotedTransaction.IsCommit = false
 		}
-		pb.SendToBlockBuilder(vote_complete_transaction)
-		log.DecideDebugf("[%v %v] (ProcessDecideTransactionCommit) Send Decided Transaction completed consensus To BlockBuilder Tx Hash: %v isCommit: %v", pb.ID(), pb.Shard(), cqc.TransactionHash, cqc.IsCommit)
+		pb.SendToCommunicator(vote_complete_transaction)
+		log.DecideDebugf("[%v %v] (ProcessDecideTransactionCommit) Send Decided Transaction completed consensus To Communicator Tx Hash: %v isCommit: %v", pb.ID(), pb.Shard(), cqc.TransactionHash, cqc.IsCommit)
 	} else {
 		pb.decidemu.Unlock()
 	}

@@ -35,14 +35,14 @@ func NewPacemaker(n int) *Pacemaker {
 	return pm
 }
 
-func (p *Pacemaker) ProcessRemoteTmo(tmo *TMO) (bool, *TC, *blockchain.WorkerBlock) {
+func (p *Pacemaker) ProcessRemoteTmo(tmo *TMO) (bool, *TC, *blockchain.ShardBlock) {
 	if tmo.View < p.curView {
 		return false, nil, nil
 	}
 	return p.timeoutController.AddTmo(tmo)
 }
 
-func (p *Pacemaker) ProcessRemoteMjorityTmo(tmo *TMO) (bool, *TC, *blockchain.WorkerBlock) {
+func (p *Pacemaker) ProcessRemoteMjorityTmo(tmo *TMO) (bool, *TC, *blockchain.ShardBlock) {
 	if tmo.View < p.curView {
 		return false, nil, nil
 	}

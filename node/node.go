@@ -39,13 +39,12 @@ type node struct {
 
 	socket.Socket
 	//Database
-	MessageChan           chan interface{}
-	CrossChainMessageChan chan interface{}
-	TxChan                chan interface{}
-	handles               map[string]reflect.Value
-	server                *http.Server
-	isByz                 bool
-	totalTxn              int
+	MessageChan chan interface{}
+	TxChan      chan interface{}
+	handles     map[string]reflect.Value
+	server      *http.Server
+	isByz       bool
+	totalTxn    int
 
 	sync.RWMutex
 	forwards map[string]*message.Transaction
@@ -54,18 +53,16 @@ type node struct {
 // NewNode creates a new Node object from configuration
 func NewNode(id identity.NodeID, isByz bool, shard types.Shard) Node {
 	return &node{
-		id:     id,
-		shard:  shard,
-		state:  types.READY,
-		role:   types.VALIDATOR,
-		isByz:  isByz,
-		Socket: socket.NewSocket(id, config.Configuration.Addrs, shard),
-		//Database:    NewDatabase(),
-		MessageChan:           make(chan interface{}, config.Configuration.ChanBufferSize),
-		CrossChainMessageChan: make(chan interface{}, config.Configuration.ChanBufferSize),
-		TxChan:                make(chan interface{}, config.Configuration.ChanBufferSize),
-		handles:               make(map[string]reflect.Value),
-		forwards:              make(map[string]*message.Transaction),
+		id:          id,
+		shard:       shard,
+		state:       types.READY,
+		role:        types.VALIDATOR,
+		isByz:       isByz,
+		Socket:      socket.NewSocket(id, config.Configuration.Addrs, shard),
+		MessageChan: make(chan interface{}, config.Configuration.ChanBufferSize),
+		TxChan:      make(chan interface{}, config.Configuration.ChanBufferSize),
+		handles:     make(map[string]reflect.Value),
+		forwards:    make(map[string]*message.Transaction),
 	}
 }
 
@@ -135,7 +132,6 @@ func (n *node) Run(wg *sync.WaitGroup) {
 	log.Infof("node %v start running", n.id)
 	if len(n.handles) > 0 {
 		go n.handle()
-		go n.handleCrossChain()
 		go n.recv()
 		go n.txn()
 	}
@@ -144,8 +140,8 @@ func (n *node) Run(wg *sync.WaitGroup) {
 		ConsensusNodeID: n.id,
 		IP:              n.Socket.GetAddresses()[n.shard][n.id],
 	}
-	n.SendToBlockBuilder(registerMessage)
-	log.Debugf("shard: %v, id: %v send register request message to blockbuilder", n.shard, n.id)
+	n.SendToCommunicator(registerMessage)
+	log.Debugf("shard: %v, id: %v send register request message to communicator", n.shard, n.id)
 	wg.Done()
 	// n.http()
 }
@@ -200,19 +196,5 @@ func (n *node) handle() {
 			log.Fatalf("no registered handle function for message type %v", name)
 		}
 		go f.Call([]reflect.Value{v})
-	}
-}
-
-// handle receives messages from message channel and calls handle function using refection
-func (n *node) handleCrossChain() {
-	for {
-		msg := <-n.CrossChainMessageChan
-		v := reflect.ValueOf(msg)
-		name := v.Type().String()
-		f, exists := n.handles[name]
-		if !exists {
-			log.Fatalf("no registered handle function for message type %v", name)
-		}
-		f.Call([]reflect.Value{v})
 	}
 }
