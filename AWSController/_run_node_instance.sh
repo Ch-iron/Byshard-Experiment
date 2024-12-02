@@ -134,16 +134,8 @@ if [ -f "${INSTANCES_FILE}" ]; then
 else
     # Run 할 Region을 결정
     # regions=(SEOUL)
-    ## Shard4
-    # regions=(TOKYO CANADA CALIFORNIA FRANKFURT)
-    ## Shard6
-    # regions=(TOKYO CANADA CALIFORNIA FRANKFURT SEOUL TOKYO)
-    ## Shard8
-    # regions=(TOKYO CANADA CALIFORNIA FRANKFURT SEOUL TOKYO CANADA CALIFORNIA)
-    ## Shard10
-    regions=(TOKYO CANADA CALIFORNIA FRANKFURT SEOUL TOKYO CANADA CALIFORNIA FRANKFURT SEOUL)
-    ## Shard12
-    # regions=(TOKYO CANADA CALIFORNIA FRANKFURT SEOUL TOKYO CANADA CALIFORNIA FRANKFURT SEOUL TOKYO CANADA)
+    ## Shard 3
+    # regions=(TOKYO CALIFORNIA FRANKFURT)
 
     for region in ${regions[@]}
     do
@@ -154,8 +146,8 @@ else
 
         IMAGE_ID="${EXECUTE_REGION[0]}"
         TYPE="${C5NXL}"
-        KEY_NAME="paperexperiment"
-        NAME="paperexperiment-test-10Real"
+        KEY_NAME="unishard"
+        NAME="cheolhoon"
         REGION="${EXECUTE_REGION[1]}"
         SUBNET_ID="${EXECUTE_REGION[2]}"
         COUNT="${EXECUTE_REGION[3]}"

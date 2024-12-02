@@ -131,8 +131,8 @@ func (s *socket) SendToCommunicator(m interface{}) {
 		return
 	}
 
-	// latencytimer := utils.GetBetweenShardTimer(s.shard, s.shard)
-	// <-latencytimer.C
+	latencytimer := utils.GetBetweenShardTimer(s.shard, s.shard)
+	<-latencytimer.C
 	s.communicator.Send(m)
 }
 
@@ -214,9 +214,9 @@ func (s *socket) MulticastQuorum(quorum int, m interface{}) {
 }
 
 func (s *socket) Broadcast(m interface{}) {
-	//log.Debugf("node %s broadcasting message %+v", s.id, m)
-	// latencytimer := utils.GetBetweenShardTimer(s.shard, s.shard)
-	// <-latencytimer.C
+	// log.Debugf("node %s broadcasting message %+v", s.id, m)
+	latencytimer := utils.GetBetweenShardTimer(s.shard, s.shard)
+	<-latencytimer.C
 	for id := range s.addresses[s.shard] {
 		if id == s.id {
 			continue

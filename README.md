@@ -1,7 +1,7 @@
 ## Install
 ```
-$ git clone https://github.com/Ch-iron/Paper-Experiment
-$ cd Paper-Experiment
+$ git clone https://github.com/Ch-iron/Byshard-Experiment
+$ cd Byshard-Experiment
 ```
 ## Build
 1. Client Build

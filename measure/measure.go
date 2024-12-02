@@ -91,29 +91,27 @@ func (measure *PBFTMeasure) CalculateMeasurements(curShardBlockBlock *blockchain
 		case true:
 			tx.LatencyDissection.CommitToBlockTime = time.Now().UnixMilli() - tx.LatencyDissection.CommitToBlockTime
 			rootvoteconsensustime, network1, voteconsensustime, network2, decideconsensustime, network3, commitconsensustime, blockwaitingtime, committoblocktime := CalculateLatencyDissection(tx)
-			// if IsExist(tx.To, shard) {
-			// 	measure.TotalCommittedTx++
-			// 	measure.TotalCommittedCrossTx++
-			// }
-			measure.TotalCommittedTx++
-			measure.TotalCommittedCrossTx++
-			measure.TotalRootVoteConsensusTime += rootvoteconsensustime
-			measure.TotalNetwork1 += network1
-			measure.TotalVoteConsensusTime += voteconsensustime
-			measure.TotalNetwork2 += network2
-			measure.TotalDecideConsensusTime += decideconsensustime
-			measure.TotalNetwork3 += network3
-			measure.TotalCommitConsensusTime += commitconsensustime
-			measure.TotalBlockWaitingtime += blockwaitingtime
-			measure.TotalCommitToBlockTime += committoblocktime
+			if IsExist(tx.To, shard) {
+				measure.TotalCommittedTx++
+				measure.TotalCommittedCrossTx++
+				measure.TotalRootVoteConsensusTime += rootvoteconsensustime
+				measure.TotalNetwork1 += network1
+				measure.TotalVoteConsensusTime += voteconsensustime
+				measure.TotalNetwork2 += network2
+				measure.TotalDecideConsensusTime += decideconsensustime
+				measure.TotalNetwork3 += network3
+				measure.TotalCommitConsensusTime += commitconsensustime
+				measure.TotalBlockWaitingtime += blockwaitingtime
+				measure.TotalCommitToBlockTime += committoblocktime
+				crosslatency := time.Now().UnixMilli() - tx.Timestamp
+				crossShardTransactionLatency = append(crossShardTransactionLatency, &message.CrossShardTransactionLatency{
+					Hash:    tx.Hash,
+					Latency: crosslatency,
+				})
+				measure.TotalCrossLatency += crosslatency
+				measure.TotalCrossProcessTime += tx.LatencyDissection.ProcessTime
+			}
 			// log.PerformanceInfof("Network1: %v, Network2: %v, Network3: %v", network1, network2, network3)
-			crosslatency := time.Now().UnixMilli() - tx.Timestamp
-			crossShardTransactionLatency = append(crossShardTransactionLatency, &message.CrossShardTransactionLatency{
-				Hash:    tx.Hash,
-				Latency: crosslatency,
-			})
-			measure.TotalCrossLatency += crosslatency
-			measure.TotalCrossProcessTime += tx.LatencyDissection.ProcessTime
 		case false:
 			tx.LocalLatencyDissection.CommitToBlockTime = time.Now().UnixMilli() - tx.LocalLatencyDissection.CommitToBlockTime
 			measure.TotalCommittedTx++
@@ -164,7 +162,7 @@ func (measure *PBFTMeasure) CalculateMeasurements(curShardBlockBlock *blockchain
 
 	experiment := message.Experiment{}
 	experiment.CrossShardTransactionLatency = crossShardTransactionLatency
-	if time.Since(measure.StartTime).Seconds() >= 50 && !measure.StartTime.IsZero() {
+	if time.Since(measure.StartTime).Seconds() >= 0 && !measure.StartTime.IsZero() {
 		experimentTransactionResult := message.ExperimentTransactionResult{
 			TotalTransaction: measure.TotalCommittedTx,
 			LocalTransaction: measure.TotalCommittedLocalTx,
@@ -184,7 +182,6 @@ func (measure *PBFTMeasure) CalculateMeasurements(curShardBlockBlock *blockchain
 			LocalWaitingTime:             avgLocalBlockWaitingTime,
 			LocalConsensusForCommit:      avgLocalCommitToBlockTime,
 			Total:                        total,
-			FlagForExperiment:            true,
 		}
 	}
 

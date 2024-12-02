@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"reflect"
 	"sync"
+	"time"
 
 	"paperexperiment/blockchain"
 	"paperexperiment/config"
@@ -24,19 +25,21 @@ type (
 	Gateway struct {
 		node.GatewayNode
 
-		CommunicatorTopic                chan interface{}
-		GatewayTopic                     chan interface{}
-		CommunicatorList                 map[types.Shard]string
-		CommunicatorTransports           map[types.Shard]transport.Transport
-		shardSharedVariableList          map[types.Shard][]string
-		contractRwSet                    map[common.Address]map[string]types.RwSet
-		sendedTransactionList            map[types.Shard][]common.Hash
-		clientStart                      []types.Shard
-		Experiment                       map[common.Hash]int64
-		flagForExperiment                map[types.Shard]bool
-		savedExperimentTransactionResult map[types.Shard]message.ExperimentTransactionResult
-		savedExperiment                  map[types.Shard]message.Experiment
-		once                             sync.Once
+		CommunicatorTopic                                                                 chan interface{}
+		GatewayTopic                                                                      chan interface{}
+		CommunicatorList                                                                  map[types.Shard]string
+		CommunicatorTransports                                                            map[types.Shard]transport.Transport
+		shardSharedVariableList                                                           map[types.Shard][]string
+		contractRwSet                                                                     map[common.Address]map[string]types.RwSet
+		sendedTransactionList                                                             map[types.Shard][]common.Hash
+		clientStart                                                                       []types.Shard
+		Experiment                                                                        map[common.Hash]int64
+		flagForExperiment                                                                 map[types.Shard]bool
+		savedExperimentTransactionResult                                                  []message.ExperimentTransactionResult
+		savedExperiment                                                                   map[types.Shard]message.Experiment
+		once                                                                              sync.Once
+		cnt                                                                               int
+		one_local, one_cross, two_local, two_cross, three_local, three_cross, total_cross int
 	}
 )
 
@@ -52,8 +55,19 @@ func NewInitGateway(ip string, shard types.Shard) *Gateway {
 	gw.sendedTransactionList = make(map[types.Shard][]common.Hash)
 	gw.Experiment = make(map[common.Hash]int64)
 	gw.flagForExperiment = make(map[types.Shard]bool)
-	gw.savedExperimentTransactionResult = make(map[types.Shard]message.ExperimentTransactionResult)
+	gw.savedExperimentTransactionResult = make([]message.ExperimentTransactionResult, 0, 4)
+	initExperimentResult := message.ExperimentTransactionResult{
+		TotalTransaction: 0,
+		CrossTransaction: 0,
+		LocalTransaction: 0,
+		RunningTime:      0,
+	}
+	for i := 0; i <= config.GetConfig().ShardCount; i++ {
+		gw.savedExperimentTransactionResult = append(gw.savedExperimentTransactionResult, initExperimentResult)
+	}
 	gw.savedExperiment = make(map[types.Shard]message.Experiment)
+	gw.cnt = 0
+	gw.one_local, gw.one_cross, gw.two_local, gw.two_cross, gw.three_local, gw.three_cross, gw.total_cross = 0, 0, 0, 0, 0, 0, 0
 
 	/* Register to gob en/decoder */
 	gob.Register(message.ShardSharedVariableRegisterRequest{})
@@ -111,9 +125,59 @@ func (gw *Gateway) Start() {
 	log.Debugf("start Gateway event loop")
 
 	wg.Add(1)
+	interval := time.NewTicker(time.Millisecond * 1000)
 	go func() {
-		cnt := 0
-		one_local, one_cross, two_local, two_cross, three_local, three_cross, total_cross := 0, 0, 0, 0, 0, 0, 0
+		for range interval.C {
+			if gw.cnt >= config.GetConfig().Benchmark.N-100 {
+				totalCrossShardLatency := int64(0)
+				for _, latency := range gw.Experiment {
+					totalCrossShardLatency += latency
+				}
+				avgCrossShardLatency := math.Round((float64(totalCrossShardLatency)/1000)/(float64(len(gw.Experiment)))*1000) / 1000
+				log.Debugf("[Gateway] avg cross latency: %v, one local: %v, cross: %v, two local: %v, cross: %v, three local: %v, cross: %v, total cross: %v", avgCrossShardLatency, gw.one_local, gw.one_cross, gw.two_local, gw.two_cross, gw.three_local, gw.three_cross, gw.total_cross)
+				systemTPS := 0.0
+				sumOfTotalTPS := 0.0
+				sumOfLocalLatency := 0.0
+				sumOfCrossLatency := 0.0
+				sumOfConsensusForISC := 0.0
+				sumOfISC := 0.0
+				sumOfConsensusForCommit := 0.0
+				sumOfWaitingTime := 0.0
+				sumOfLocalConsensus := 0.0
+				sumOfLocalWaitingTime := 0.0
+				sumOfLocalConsensusForCommit := 0.0
+				for i := 1; i <= config.GetConfig().ShardCount; i++ {
+					savedExperimentTransactionResult := gw.savedExperimentTransactionResult[types.Shard(i)]
+					savedExperiment := gw.savedExperiment[types.Shard(i)]
+					systemTPS += math.Round((float64(savedExperimentTransactionResult.TotalTransaction) / savedExperimentTransactionResult.RunningTime))
+					sumOfTotalTPS += math.Round((float64(savedExperimentTransactionResult.TotalTransaction) / savedExperimentTransactionResult.RunningTime))
+					sumOfLocalLatency += savedExperiment.LocalLatency
+					sumOfCrossLatency += avgCrossShardLatency
+					sumOfConsensusForISC += savedExperiment.ConsensusForISC
+					sumOfISC += savedExperiment.ISC
+					sumOfConsensusForCommit += savedExperiment.ConsensusForCommit
+					sumOfWaitingTime += savedExperiment.WaitingTime
+					sumOfLocalConsensus += savedExperiment.LocalConsensus
+					sumOfLocalWaitingTime += savedExperiment.LocalWaitingTime
+					sumOfLocalConsensusForCommit += savedExperiment.LocalConsensusForCommit
+				}
+				log.ExperimentResultf("%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f",
+					systemTPS,
+					sumOfTotalTPS/float64(config.GetConfig().ShardCount),
+					sumOfLocalLatency/float64(config.GetConfig().ShardCount),
+					sumOfCrossLatency/float64(config.GetConfig().ShardCount),
+					sumOfConsensusForISC/float64(config.GetConfig().ShardCount),
+					sumOfISC/float64(config.GetConfig().ShardCount),
+					sumOfConsensusForCommit/float64(config.GetConfig().ShardCount),
+					sumOfWaitingTime/float64(config.GetConfig().ShardCount),
+					sumOfLocalConsensus/float64(config.GetConfig().ShardCount),
+					sumOfLocalWaitingTime/float64(config.GetConfig().ShardCount),
+					sumOfLocalConsensusForCommit/float64(config.GetConfig().ShardCount),
+				)
+			}
+		}
+	}()
+	go func() {
 		for {
 			select {
 			case msg := <-gw.GatewayTopic:
@@ -177,11 +241,8 @@ func (gw *Gateway) Start() {
 						}
 					}
 
-					_, exist := gw.savedExperimentTransactionResult[v.Shard]
-					if v.FlagForExperiment && !exist {
-						gw.savedExperimentTransactionResult[v.Shard] = v.ExperimentTransactionResult
-					}
-					// gw.savedExperimentTransactionResult[v.Shard] = v.ExperimentTransactionResult
+					// fmt.Printf("Shard: %v, Total: %v, Cross: %v, Local: %v\n", v.Shard, v.ExperimentTransactionResult.TotalTransaction, v.ExperimentTransactionResult.CrossTransaction, v.ExperimentTransactionResult.LocalTransaction)
+					gw.savedExperimentTransactionResult[v.Shard] = v.ExperimentTransactionResult
 					gw.savedExperiment[v.Shard] = v
 				case message.TransactionForm:
 					switch {
@@ -215,26 +276,26 @@ func (gw *Gateway) Start() {
 							}
 
 							tx := message.MakeSmartContractTransaction(v, rwSet, isCrossShardTx)
-							cnt++
+							gw.cnt++
 							if len(shardToSend) == 1 {
 								switch shardToSend[0] {
 								case 1:
-									one_local++
+									gw.one_local++
 								case 2:
-									two_local++
+									gw.two_local++
 								case 3:
-									three_local++
+									gw.three_local++
 								}
 							} else if len(shardToSend) > 1 {
-								total_cross++
+								gw.total_cross++
 								for _, shard := range shardToSend {
 									switch shard {
 									case 1:
-										one_cross++
+										gw.one_cross++
 									case 2:
-										two_cross++
+										gw.two_cross++
 									case 3:
-										three_cross++
+										gw.three_cross++
 									}
 								}
 							}
@@ -242,12 +303,12 @@ func (gw *Gateway) Start() {
 								for idx, shard := range shardToSend {
 									gw.sendedTransactionList[shard] = append(gw.sendedTransactionList[shard], tx.Hash)
 									if idx == 0 {
-										log.Debugf("[Gateway] %v Send Cross_Transaction Hash: %v, From: %v, To: %v, Value: %v, to shard %v, Rwset: %v", cnt, tx.Hash, tx.From, tx.To, tx.Value, shardToSend[0], tx.RwSet)
+										log.Debugf("[Gateway] %v Send Cross_Transaction Hash: %v, From: %v, To: %v, Value: %v, to shard %v, Rwset: %v", gw.cnt, tx.Hash, tx.From, tx.To, tx.Value, shardToSend[0], tx.RwSet)
 									}
 								}
 							} else {
 								gw.sendedTransactionList[shardToSend[0]] = append(gw.sendedTransactionList[shardToSend[0]], tx.Hash)
-								log.Debugf("[Gateway] %v Send Local Transaction Hash: %v, From: %v, To: %v, Value: %v, to shard: %v, RwSet: %v", cnt, tx.Hash, tx.From, tx.To, tx.Value, shardToSend[0], tx.RwSet)
+								log.Debugf("[Gateway] %v Send Local Transaction Hash: %v, From: %v, To: %v, Value: %v, to shard: %v, RwSet: %v", gw.cnt, tx.Hash, tx.From, tx.To, tx.Value, shardToSend[0], tx.RwSet)
 
 							}
 							gw.CommunicatorTransports[shardToSend[0]].Send(tx)
@@ -257,26 +318,26 @@ func (gw *Gateway) Start() {
 						shardToSend := utils.CalculateShardToSend([]common.Address{v.From, v.To})
 						isCrossShardTx := len(shardToSend) > 1
 						tx := message.MakeTransferTransaction(v, isCrossShardTx)
-						cnt++
+						gw.cnt++
 						if len(shardToSend) == 1 {
 							switch shardToSend[0] {
 							case 1:
-								one_local++
+								gw.one_local++
 							case 2:
-								two_local++
+								gw.two_local++
 							case 3:
-								three_local++
+								gw.three_local++
 							}
 						} else if len(shardToSend) > 1 {
-							total_cross++
+							gw.total_cross++
 							for _, shard := range shardToSend {
 								switch shard {
 								case 1:
-									one_cross++
+									gw.one_cross++
 								case 2:
-									two_cross++
+									gw.two_cross++
 								case 3:
-									three_cross++
+									gw.three_cross++
 								}
 							}
 						}
@@ -284,12 +345,12 @@ func (gw *Gateway) Start() {
 							for idx, shard := range shardToSend {
 								gw.sendedTransactionList[shard] = append(gw.sendedTransactionList[shard], tx.Hash)
 								if idx == 0 {
-									log.Debugf("[Gateway] %v Send Cross_Transaction Hash: %v, From: %v, To: %v, Value: %v, to shard %v, Rwset: %v", cnt, tx.Hash, tx.From, tx.To, tx.Value, shardToSend[0], tx.RwSet)
+									log.Debugf("[Gateway] %v Send Cross_Transaction Hash: %v, From: %v, To: %v, Value: %v, to shard %v, Rwset: %v", gw.cnt, tx.Hash, tx.From, tx.To, tx.Value, shardToSend[0], tx.RwSet)
 								}
 							}
 						} else {
 							gw.sendedTransactionList[shardToSend[0]] = append(gw.sendedTransactionList[shardToSend[0]], tx.Hash)
-							log.Debugf("[Gateway] %v Send Local Transaction Hash: %v, From: %v, To: %v, Value: %v, to shard %v", cnt, tx.Hash, tx.From, tx.To, tx.Value, shardToSend[0])
+							log.Debugf("[Gateway] %v Send Local Transaction Hash: %v, From: %v, To: %v, Value: %v, to shard %v", gw.cnt, tx.Hash, tx.From, tx.To, tx.Value, shardToSend[0])
 						}
 						gw.CommunicatorTransports[shardToSend[0]].Send(tx)
 					}
@@ -316,53 +377,6 @@ func (gw *Gateway) Start() {
 				gw.once.Do(func() {
 					log.ExperimentResultf("SystemTPS,TotalTPS,LocalLatency,CrossLatency,ConsensusForISC,ISC,ConsensusForCommit,WaitingTime,LocalConsensus,LocalWaitingTime,LocalConsensusForCommit")
 				})
-				if cnt == config.GetConfig().Benchmark.N {
-					totalCrossShardLatency := int64(0)
-					for _, latency := range gw.Experiment {
-						totalCrossShardLatency += latency
-					}
-					avgCrossShardLatency := math.Round((float64(totalCrossShardLatency)/1000)/(float64(len(gw.Experiment)))*1000) / 1000
-					log.Debugf("[Gateway] avg cross latency: %v, one local: %v, cross: %v, two local: %v, cross: %v, three local: %v, cross: %v, total cross: %v", avgCrossShardLatency, one_local, one_cross, two_local, two_cross, three_local, three_cross, total_cross)
-					systemTPS := 0.0
-					sumOfTotalTPS := 0.0
-					sumOfLocalLatency := 0.0
-					sumOfCrossLatency := 0.0
-					sumOfConsensusForISC := 0.0
-					sumOfISC := 0.0
-					sumOfConsensusForCommit := 0.0
-					sumOfWaitingTime := 0.0
-					sumOfLocalConsensus := 0.0
-					sumOfLocalWaitingTime := 0.0
-					sumOfLocalConsensusForCommit := 0.0
-					for i := 1; i <= config.GetConfig().ShardCount; i++ {
-						savedExperimentTransactionResult := gw.savedExperimentTransactionResult[types.Shard(i)]
-						savedExperiment := gw.savedExperiment[types.Shard(i)]
-						systemTPS += math.Round((float64(savedExperimentTransactionResult.TotalTransaction) / savedExperimentTransactionResult.RunningTime))
-						sumOfTotalTPS += math.Round((float64(savedExperimentTransactionResult.TotalTransaction) / savedExperimentTransactionResult.RunningTime))
-						sumOfLocalLatency += savedExperiment.LocalLatency
-						sumOfCrossLatency += avgCrossShardLatency
-						sumOfConsensusForISC += savedExperiment.ConsensusForISC
-						sumOfISC += savedExperiment.ISC
-						sumOfConsensusForCommit += savedExperiment.ConsensusForCommit
-						sumOfWaitingTime += savedExperiment.WaitingTime
-						sumOfLocalConsensus += savedExperiment.LocalConsensus
-						sumOfLocalWaitingTime += savedExperiment.LocalWaitingTime
-						sumOfLocalConsensusForCommit += savedExperiment.LocalConsensusForCommit
-					}
-					log.ExperimentResultf("%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f",
-						systemTPS,
-						sumOfTotalTPS/float64(config.GetConfig().ShardCount),
-						sumOfLocalLatency/float64(config.GetConfig().ShardCount),
-						sumOfCrossLatency/float64(config.GetConfig().ShardCount),
-						sumOfConsensusForISC/float64(config.GetConfig().ShardCount),
-						sumOfISC/float64(config.GetConfig().ShardCount),
-						sumOfConsensusForCommit/float64(config.GetConfig().ShardCount),
-						sumOfWaitingTime/float64(config.GetConfig().ShardCount),
-						sumOfLocalConsensus/float64(config.GetConfig().ShardCount),
-						sumOfLocalWaitingTime/float64(config.GetConfig().ShardCount),
-						sumOfLocalConsensusForCommit/float64(config.GetConfig().ShardCount),
-					)
-				}
 
 			// drop another topic
 			case <-gw.CommunicatorTopic:

@@ -33,10 +33,10 @@
   "crash": 20000,
   "benchmark": {
     "T": 0,
-    "N": 5000,
+    "N": 30000,
     "K": 1000,
     "W": 0.5,
-    "Throttle": 100,
+    "Throttle": 500,
     "Concurrency": 10,
     "Distribution": "uniform",
     "LinearizabilityCheck": false,
@@ -49,7 +49,7 @@
     "Zipfian_s": 2,
     "Zipfian_v": 1,
     "Lambda": 0.01,
-    "TXRatioPerType": [245, 455, 105, 195],
+    "TXRatioPerType": [175, 325, 175, 325],
     "ZipfTheta": 0.6
   },
   "locking_degree": 3,
